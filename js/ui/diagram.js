@@ -149,10 +149,10 @@
       g.setAttribute('clip-path', 'url(#dg-sweep)');
       var beam = el('line', { x1: 0, y1: 0, x2: 0, y2: H, class: 'sweep-beam' });
       svg.appendChild(beam);
-      var t0 = null, dur = 900;
+      var sweepStart = null, dur = 900;   // ここで t0 を名乗ると時間軸の原点を壊すので別名にする
       var step = function (ts) {
-        if (t0 == null) t0 = ts;
-        var r = Math.min(1, (ts - t0) / dur);
+        if (sweepStart == null) sweepStart = ts;
+        var r = Math.min(1, (ts - sweepStart) / dur);
         var e = 1 - Math.pow(1 - r, 3);
         clipRect.setAttribute('width', (W * e).toFixed(1));
         beam.setAttribute('x1', (W * e).toFixed(1));
@@ -215,17 +215,60 @@
     this.elTime.innerHTML = ''; this.elTime.appendChild(tsvg);
 
     // --- 駅名（左） ---
-    var ssvg = el('svg', { width: 112, height: H });
+    // 文字幅を実測して列の幅を決める。切り詰めず、入らないときだけ字を小さくする。
+    var ssvg = el('svg', { height: H });
+    this.elSt.innerHTML = '';
+    this.elSt.appendChild(ssvg);
+
+    var MIN_GAP = 11;           // これより詰まった駅名は間引く
+    var lastLabelY = -Infinity;
+    var labels = [];
     line.stations.forEach(function (st, i) {
-      ssvg.appendChild(el('line', { x1: 100, y1: ys.y[i], x2: 112, y2: ys.y[i], class: 'st-line major' }));
-      var name = st.name.length > 7 ? st.name.slice(0, 6) + '…' : st.name;
-      ssvg.appendChild(el('text', {
-        x: 96, y: ys.y[i] + 3.5, 'text-anchor': 'end',
+      ssvg.appendChild(el('line', { x1: 0, y1: ys.y[i], x2: 0, y2: ys.y[i], class: 'st-line major', 'data-tick': i }));
+      var keep = st.canTurn || st.depot || st.canOvertake || i === 0 || i === line.stations.length - 1;
+      var tight = ys.y[i] - lastLabelY < MIN_GAP;
+      if (!keep && tight) return;
+      if (keep && tight && labels.length && !labels[labels.length - 1].keep) {
+        // 設備のある駅を優先し、直前のふつうの駅名は取り下げる
+        var prev = labels.pop();
+        prev.t.parentNode.removeChild(prev.t);
+        lastLabelY = labels.length ? ys.y[labels[labels.length - 1].i] : -Infinity;
+      }
+      lastLabelY = ys.y[i];
+      var t = el('text', {
+        x: 0, y: ys.y[i] + 3.5, 'text-anchor': 'end',
         class: 'st-name' + (st.canTurn ? ' turn' : '')
-      }, name));
-      if (st.canOvertake) ssvg.appendChild(el('circle', { cx: 104, cy: ys.y[i], r: 2.4, fill: 'var(--warn)' }));
+      }, st.name);
+      t.appendChild(el('title', {}, st.name + '（' + st.km.toFixed(1) + 'km）'));
+      ssvg.appendChild(t);
+      labels.push({ t: t, st: st, i: i, keep: keep });
     });
-    this.elSt.innerHTML = ''; this.elSt.appendChild(ssvg);
+
+    var maxText = 0;
+    labels.forEach(function (l) { maxText = Math.max(maxText, textWidth(l.t)); });
+    var room = Math.min(220, Math.max(96, Math.floor((self.host.clientWidth || 900) * 0.4)));
+    var GUTTER = 26;            // 目盛と待避マークのぶん
+    var fs = 11;
+    if (maxText + GUTTER > room) {
+      fs = Math.max(8, Math.floor(11 * (room - GUTTER) / maxText));
+      labels.forEach(function (l) { l.t.setAttribute('font-size', fs); });
+      maxText = 0;
+      labels.forEach(function (l) { maxText = Math.max(maxText, textWidth(l.t)); });
+    }
+    var WST = Math.round(Math.max(76, Math.min(room, maxText + GUTTER)));
+
+    ssvg.setAttribute('width', WST);
+    this.host.style.gridTemplateColumns = WST + 'px 1fr';
+    labels.forEach(function (l) { l.t.setAttribute('x', WST - 16); });
+    var ticks = ssvg.querySelectorAll('[data-tick]');
+    for (var k = 0; k < ticks.length; k++) {
+      ticks[k].setAttribute('x1', WST - 12);
+      ticks[k].setAttribute('x2', WST);
+    }
+    line.stations.forEach(function (st, i) {
+      if (!st.canOvertake) return;
+      ssvg.appendChild(el('circle', { cx: WST - 8, cy: ys.y[i], r: 2.4, fill: 'var(--warn)' }));
+    });
 
     this.bindPointer(typeMap);
     this.nowG = null; this.dotMap = {};
@@ -372,6 +415,11 @@
     var target = this.x(sec) - this.elPlot.clientWidth / 2;
     this.elPlot.scrollLeft = Math.max(0, target);
   };
+
+  /** SVG テキストの実描画幅 */
+  function textWidth(t) {
+    try { return t.getComputedTextLength(); } catch (e) { return (t.textContent || '').length * 11; }
+  }
 
   function prefersReducedMotion() {
     return window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
