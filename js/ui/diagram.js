@@ -138,8 +138,9 @@
         var s = Sch.stopAt(tr, h.idx);
         if (!s) return;
         var cx = self.x((s.arr + s.dep) / 2);
-        if (glow) g.appendChild(el('circle', { cx: cx, cy: ys.y[h.idx], r: 5, class: 'hold-halo' }));
-        g.appendChild(el('circle', { cx: cx, cy: ys.y[h.idx], r: 2, class: 'hold-dot' }));
+        var hd = el('circle', { cx: cx, cy: ys.y[h.idx], r: glow ? 2.6 : 2, class: 'hold-dot' });
+        if (!glow) hd.style.filter = 'none';
+        g.appendChild(hd);
       });
     });
     svg.appendChild(g);
@@ -355,7 +356,7 @@
     if (!this.svg || !this.x) return 0;
     var line = this.state.line, self = this;
     if (!this.nowG || this.nowG.ownerSVGElement !== this.svg) {
-      this.nowG = el('g', { class: 'now-layer', filter: 'url(#dg-neon)' });
+      this.nowG = el('g', { class: 'now-layer' });
       this.nowLine = el('line', { class: 'now-line', y1: 0, y2: this.svg.getAttribute('height') });
       this.nowG.appendChild(this.nowLine);
       this.nowDots = el('g', {});
@@ -381,13 +382,17 @@
       live[tr.no] = true; n++;
       var d = self.dotMap[tr.no];
       if (!d) {
-        d = self.dotMap[tr.no] = el('circle', { r: 3.1, class: 'now-dot' });
+        d = self.dotMap[tr.no] = el('circle', { r: 4, class: 'now-dot' });
         self.nowDots.appendChild(d);
       }
+      var isLate = !!(delays && delays[tr.no]);
+      var col = isLate ? 'var(--warn)' : ((typeMap[tr.typeId] || {}).color || '#fff');
       d.setAttribute('cx', x.toFixed(1));
       d.setAttribute('cy', self.yOfKm(p.km).toFixed(1));
-      d.setAttribute('fill', (typeMap[tr.typeId] || {}).color || '#fff');
-      d.classList.toggle('late', !!(delays && delays[tr.no]));
+      d.setAttribute('fill', col);
+      // ドット自身の色で光らせる（ダッシュボードの輝点と同じ作り）
+      d.style.filter = 'drop-shadow(0 0 9px ' + col + ')';
+      d.classList.toggle('late', isLate);
       d.style.display = '';
     });
     Object.keys(this.dotMap).forEach(function (no) {

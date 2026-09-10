@@ -152,8 +152,8 @@ thead .sticky-col{z-index:3;background:var(--panel2)}
 .st-name{fill:var(--ink);font-size:11px;font-family:var(--ui)}
 .st-name.turn{font-weight:700}
 .single-band{fill:color-mix(in srgb,var(--warn) 14%,transparent)}
-.hold-dot{fill:var(--warn)}
-.hold-halo{fill:var(--warn);opacity:.3}
+.hold-dot{fill:var(--warn);stroke:var(--plot-bg);stroke-width:1.4;
+  filter:drop-shadow(0 0 6px color-mix(in srgb,var(--warn) 85%,transparent))}
 .tip{position:absolute;pointer-events:none;background:color-mix(in srgb,var(--panel) 92%,transparent);
   border:1px solid var(--line-strong);backdrop-filter:blur(6px);
   border-radius:8px;padding:7px 10px;font-size:11px;box-shadow:var(--shadow);z-index:9;white-space:pre;display:none;
@@ -216,10 +216,11 @@ pre.out{background:var(--panel2);border:1px solid var(--line);border-radius:8px;
 .sweep-beam{stroke:var(--accent);stroke-width:2;filter:drop-shadow(0 0 8px var(--accent))}
 
 /* 現在時刻カーソル */
-.now-line{stroke:var(--ok);stroke-width:1.2;opacity:.95}
+.now-line{stroke:var(--ok);stroke-width:1.2;opacity:.95;
+  filter:drop-shadow(0 0 6px color-mix(in srgb,var(--ok) 70%,transparent))}
 .now-tag{fill:var(--ok);font-family:var(--mono);font-size:10px;font-weight:600}
-.now-dot{stroke:#fff;stroke-width:.8}
-.now-dot.late{stroke:var(--warn);stroke-width:1.4}
+.now-dot{stroke:var(--plot-bg);stroke-width:2}
+.now-dot.late{stroke:color-mix(in srgb,var(--warn) 45%,var(--plot-bg))}
 
 /* 状態表示ランプ */
 .chip.live{position:relative;padding-left:20px}
