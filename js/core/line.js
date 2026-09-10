@@ -57,11 +57,11 @@
   function defaultTypes() {
     return [
       {
-        id: 'local', name: '各駅停車', short: '各停', color: '#49a8ff',
+        id: 'local', name: '各駅停車', short: '各停', color: '#2e93ec',
         numberBase: 0, skips: []
       },
       {
-        id: 'rapid', name: '快速', short: '快速', color: '#ff6b5e',
+        id: 'rapid', name: '快速', short: '快速', color: '#ef5347',
         numberBase: 3000,
         skips: ['S02', 'S03', 'S06', 'S10', 'S11', 'S15', 'S16']
       }

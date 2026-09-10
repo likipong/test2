@@ -4,7 +4,7 @@
 
   var T = window.DiaTime, Line = window.DiaLine, Sch = window.DiaSchedule,
       Op = window.DiaOperation, Val = window.DiaValidate, Ex = window.DiaExport,
-      Dis = window.DiaDisrupt, Crew = window.DiaCrew, Mon = window.DiaMonitor,
+      Dis = window.DiaDisrupt, Crew = window.DiaCrew, Mon = window.DiaMonitor, Dash = window.DiaDash,
       Views = window.DiaViews, Editors = window.DiaEditors;
   var h = Views.h;
   var STORAGE = 'dia-editor-state-v1';
@@ -13,7 +13,7 @@
   var derived = { trains: [], duties: [], dutyOf: new Map(), crew: [], crewOf: new Map(),
                   crewParams: null, issues: [], notes: [] };
   var view = { pxPerMin: 4, pxPerKm: 26, yMode: 'km', hidden: {}, t0: null, t1: null, glow: true };
-  var ui = { tab: 'diagram', ttDir: 'down', ttHour: null, ttArr: false, boardSt: 0, boardDir: 'down',
+  var ui = { tab: 'dash', ttDir: 'down', ttHour: null, ttArr: false, boardSt: 0, boardDir: 'down',
              checkLevel: { error: true, warn: true, info: true }, selected: null, crewSel: null };
 
   var dg = window.DiaDiagram.create(document.getElementById('dg'));
@@ -34,7 +34,7 @@
       if (!o || !o.line) return null;
       var d = Line.defaultParams();
       for (var k in d) if (o.params[k] === undefined) o.params[k] = d[k];
-      var recolor = { '#2563eb': '#49a8ff', '#dc2626': '#ff6b5e' };
+      var recolor = { '#2563eb': '#2e93ec', '#49a8ff': '#2e93ec', '#dc2626': '#ef5347', '#ff6b5e': '#ef5347' };
       (o.types || []).forEach(function (t) { if (recolor[t.color]) t.color = recolor[t.color]; });
       return o;
     } catch (e) { return null; }
@@ -60,6 +60,7 @@
     view.overlay = null;
     view.sweep = true;
     play.built = false;
+    initPlayRange();
     save();
     renderChips();
     renderAll();
@@ -94,6 +95,7 @@
   function renderAll() {
     if (ui.tab === 'diagram') renderDiagram();
     if (ui.tab === 'timetable') renderTimetable();
+    if (ui.tab === 'dash') renderDash();
     if (ui.tab === 'monitor') renderMonitor();
     if (ui.tab === 'duty') renderDuty();
     if (ui.tab === 'crew') renderCrew();
@@ -197,6 +199,120 @@
     mount('duty-table', Views.dutyTable(state, derived.duties));
   }
 
+  /* ---------- 総合指令 ---------- */
+  function renderDash() {
+    if (play.t == null) play.t = timeSpan()[0];
+    paintClock();
+
+    var late = lateMap(), lateN = Object.keys(late).length;
+    var online = Sch.onlineAt(state.line, liveTrains(), play.t).length;
+    var sum = Val.summarize(derived.issues);
+
+    var stats = document.getElementById('d-stats');
+    stats.innerHTML = '';
+    [['運転状況', lateN ? '乱れ' : '平常', lateN ? 'warn' : 'good', ''],
+     ['在線', online, '', '本'],
+     ['遅延', lateN, lateN ? 'warn' : '', '本'],
+     ['支障', sum.error, sum.error ? 'bad' : 'good', '件'],
+     ['注意', sum.warn, sum.warn ? 'warn' : '', '件']
+    ].forEach(function (it) {
+      stats.appendChild(h('div', { class: 'stat ' + it[2] }, [
+        h('div', { class: 'k', text: it[0] }),
+        h('div', { class: 'v' }, [document.createTextNode(String(it[1])),
+          it[3] ? h('small', { text: it[3] }) : null])
+      ]));
+    });
+
+    // 在線本数の推移
+    var plan = smooth(Op.occupancyProfile(derived.trains, 60), 15);
+    var actual = derived.sim ? smooth(Op.occupancyProfile(derived.sim.trains, 60), 15) : null;
+    Dash.occupancyChart(document.getElementById('d-occ'), { plan: plan, actual: actual, now: play.t });
+    document.getElementById('d-occ-sub').textContent = '15 分平均・' + (actual ? '遅延反映後' : '計画ダイヤ');
+    var lg = document.getElementById('d-occ-legend');
+    lg.innerHTML = '';
+    if (actual) {
+      lg.appendChild(h('span', {}, [h('i', { style: 'border-color:var(--accent)' }), document.createTextNode('遅延反映後')]));
+      lg.appendChild(h('span', {}, [h('i', { style: 'border-color:var(--ink-mute);border-top-style:dashed' }), document.createTextNode('計画')]));
+    } else {
+      lg.appendChild(h('span', { text: '現在時刻の緑点が再生に合わせて動くよ' }));
+    }
+
+    // あらまし
+    var st = Sch.stats(state.line, derived.trains, derived.duties);
+    var cs = Crew.crewStats(derived.crew, derived.crewParams);
+    var tight = Dash.tightestHeadway(state.line, derived.trains);
+    var tiles = document.getElementById('d-tiles');
+    tiles.innerHTML = '';
+    [['設定列車', st.total, '本', '下り ' + st.down + ' / 上り ' + st.up],
+     ['必要編成', derived.duties.length, '本', '在線ピーク ' + peakOnline() + ' 本'],
+     ['乗務仕業', derived.crew.length, '行路', '乗務効率 ' + (cs.efficiency || 0) + '%'],
+     ['表定速度', st.bestSpeed, 'km/h', '最速 ' + T.fmtDuration(st.minRide)],
+     ['最小時隔', Math.round(tight.sec / 60 * 10) / 10, '分', (tight.at || '') + 'で最小'],
+     ['営業キロ', st.km, 'km', state.line.stations.length + ' 駅']
+    ].forEach(function (it) {
+      tiles.appendChild(h('div', { class: 'tile' }, [
+        h('div', { class: 'k', text: it[0] }),
+        h('div', { class: 'v' }, [document.createTextNode(String(it[1])), h('small', { text: it[2] })]),
+        h('div', { class: 's', text: it[3] })
+      ]));
+    });
+
+    // 直近の発車
+    var feed = document.getElementById('d-next');
+    feed.innerHTML = '';
+    Dash.upcoming(state.line, liveTrains(), play.t, 8).forEach(function (e) {
+      var ty = Views.typeOf(state.types, e.tr.typeId);
+      feed.appendChild(h('div', { class: 'frow' }, [
+        h('span', { class: 'tm' + (late[e.tr.no] >= 30 ? ' late' : ''), text: T.fmtTime(e.dep) }),
+        h('span', { class: 'st', text: state.line.stations[e.idx].name }),
+        h('span', { class: 'pill', style: 'background:' + ty.color, text: ty.short || ty.name }),
+        h('span', { text: e.tr.no + '列車' }),
+        h('span', { class: 'dst', text: '→ ' + state.line.stations[e.tr.toIdx].name }),
+        late[e.tr.no] >= 30 ? h('span', { class: 'dst', style: 'color:var(--warn)',
+          text: '+' + T.fmtDuration(late[e.tr.no]) }) : null
+      ]));
+    });
+    if (!feed.children.length) feed.appendChild(h('div', { class: 'hint', text: 'この先 1 時間に発車する列車はないよ' }));
+
+    // 検証の状況
+    var ib = document.getElementById('d-issues');
+    ib.innerHTML = '';
+    var bad = derived.issues.filter(function (i) { return i.level !== 'info'; });
+    if (!bad.length) {
+      ib.appendChild(h('div', { class: 'ok-line', text: '◎ 支障・注意はないよ。ダイヤは成立している' }));
+      var L = state.line;
+      var eq = [['待避可', L.stations.filter(function (x) { return x.canOvertake; }).length + ' 駅'],
+                ['折返し可', L.stations.filter(function (x) { return x.canTurn; }).length + ' 駅'],
+                ['車庫', L.stations.filter(function (x) { return x.depot; }).length + ' 駅'],
+                ['乗務員基地', L.stations.filter(function (x) { return x.crewBase; }).length + ' 駅'],
+                ['単線区間', L.sections.filter(function (x) { return x.single; }).length + ' 区間']];
+      var kinds = {};
+      derived.issues.forEach(function (i) { kinds[i.kind] = (kinds[i.kind] || 0) + 1; });
+      Object.keys(kinds).forEach(function (k) {
+        ib.appendChild(h('div', { class: 'frow' }, [
+          h('span', { class: 'st', text: k }),
+          h('span', { class: 'tm', text: kinds[k] + ' 件' }),
+          h('span', { class: 'dst', text: k === '待避' ? '速い列車を先に通すための抑止' :
+            k === '出庫' ? '車庫のない駅から始まる運用' : k === '入庫' ? '車庫のない駅で終わる運用' : '' })
+        ]));
+      });
+      ib.appendChild(h('div', { class: 'frow', style: 'margin-top:6px;border-top:1px solid var(--line-strong)' }, [
+        h('span', { class: 'st', text: '線区の設備' }),
+        h('span', { class: 'dst', style: 'white-space:normal',
+          text: eq.map(function (e) { return e[0] + ' ' + e[1]; }).join('　/　') })
+      ]));
+    } else {
+      bad.slice(0, 8).forEach(function (is) {
+        ib.appendChild(h('div', { class: 'frow' }, [
+          h('span', { class: 'badge ' + is.level, text: is.level === 'error' ? '支障' : '注意' }),
+          h('span', { class: 'tm', text: is.time != null ? T.fmtTime(is.time) : '' }),
+          h('span', { style: 'white-space:normal', text: is.msg })
+        ]));
+      });
+      if (bad.length > 8) ib.appendChild(h('div', { class: 'hint', text: 'ほか ' + (bad.length - 8) + ' 件' }));
+    }
+  }
+
   /* ---------- 運行モニタ ---------- */
   function timeSpan() {
     if (!derived.trains.length) return [18000, 90000];
@@ -209,6 +325,32 @@
     return derived.sim ? derived.sim.trains : derived.trains;
   }
 
+  /** 在線本数は列車の着発ごとに上下するので、読みやすいよう区間平均にならす */
+  function peakOnline() {
+    var p = Op.occupancyProfile(derived.trains, 60);
+    return p.length ? Math.max.apply(null, p.map(function (x) { return x.n; })) : 0;
+  }
+
+  function smooth(profile, win) {
+    var out = [];
+    for (var i = 0; i < profile.length; i += win) {
+      var seg = profile.slice(i, i + win);
+      if (!seg.length) break;
+      var avg = seg.reduce(function (a, p) { return a + p.n; }, 0) / seg.length;
+      out.push({ t: seg[0].t, n: Math.round(avg * 10) / 10 });
+    }
+    return out;
+  }
+
+  /** 再生の時間範囲をダイヤに合わせる */
+  function initPlayRange() {
+    var sp = timeSpan();
+    var sl = document.getElementById('pl-time');
+    sl.min = sp[0]; sl.max = sp[1];
+    if (play.t == null || play.t < sp[0] || play.t > sp[1]) play.t = sp[0];
+    sl.value = play.t;
+  }
+
   function lateMap() {
     var m = {};
     if (derived.sim) derived.sim.delays.forEach(function (d) { m[d.no] = d.delay; });
@@ -216,15 +358,7 @@
   }
 
   function renderMonitor() {
-    if (!play.built) {
-      mon.build(state);
-      play.built = true;
-      var sp = timeSpan();
-      var sl = document.getElementById('pl-time');
-      sl.min = sp[0]; sl.max = sp[1];
-      if (play.t == null) play.t = sp[0];
-      sl.value = play.t;
-    }
+    if (!play.built) { mon.build(state); play.built = true; }
     paintClock();
     var n = mon.update(play.t, liveTrains(), lateMap());
     document.getElementById('pl-online').textContent = n || 0;
@@ -233,15 +367,24 @@
   }
 
   function paintClock() {
-    var c = document.getElementById('clock');
     var parts = T.fmtTime(play.t, true).split(':');
-    c.innerHTML = '';
-    c.appendChild(document.createTextNode(parts[0] + ':' + parts[1]));
-    c.appendChild(h('small', { text: ':' + parts[2] }));
-    var tag = document.getElementById('clock-tag');
-    tag.textContent = play.on ? '運転中 ×' + play.speed : '停止中';
-    tag.classList.toggle('on', play.on);
-    document.getElementById('pl-play').textContent = play.on ? '❚❚ 一時停止' : '▶ 運転開始';
+    ['clock', 'd-clock'].forEach(function (id) {
+      var c = document.getElementById(id);
+      if (!c) return;
+      c.innerHTML = '';
+      c.appendChild(document.createTextNode(parts[0] + ':' + parts[1]));
+      c.appendChild(h('small', { text: ':' + parts[2] }));
+    });
+    ['clock-tag', 'd-clock-tag'].forEach(function (id) {
+      var tag = document.getElementById(id);
+      if (!tag) return;
+      tag.textContent = play.on ? '運転中 ×' + play.speed : '停止中';
+      tag.classList.toggle('on', play.on);
+    });
+    ['pl-play', 'd-play'].forEach(function (id) {
+      var b = document.getElementById(id);
+      if (b) b.textContent = play.on ? '❚❚ 一時停止' : '▶ 運転開始';
+    });
     var hc = document.getElementById('hdr-clock');
     hc.hidden = !play.on;
     document.getElementById('hdr-time').textContent = T.fmtTime(play.t);
@@ -286,7 +429,9 @@
     play.t += dt * play.speed;
     if (play.t > sp[1]) { play.t = sp[0]; }
     document.getElementById('pl-time').value = play.t;
+    if (ui.tab === 'dash') renderDash();
     if (ui.tab === 'monitor') renderMonitor();
+    else if (ui.tab === 'dash') { if (Math.floor(play.t) % 2 === 0) renderDash(); }
     else document.getElementById('hdr-time').textContent = T.fmtTime(play.t);
     if (ui.tab === 'diagram') {
       dg.showNow(play.t, liveTrains(), lateMap());
@@ -360,7 +505,7 @@
     if (derived.notes.length) f.appendChild(h('span', { class: 'notes', text: derived.notes.join(' / ') }));
     var list = derived.issues.filter(function (i) { return ui.checkLevel[i.level]; });
     mount('check-list', Views.issueList(list, function (is) {
-      switchTab('diagram');
+      switchTab('dash');
       setTimeout(function () {
         dg.scrollToTime(is.time);
         if (is.trains && is.trains.length) { ui.selected = is.trains[0]; dg.setSelection(is.trains); }
@@ -638,6 +783,7 @@
   });
   document.getElementById('pl-time').addEventListener('input', function (e) {
     play.t = parseFloat(e.target.value);
+    if (ui.tab === 'dash') renderDash();
     if (ui.tab === 'monitor') renderMonitor();
     if (ui.tab === 'diagram') { dg.showNow(play.t, liveTrains(), lateMap()); dg.followTime(play.t); }
   });
@@ -651,14 +797,25 @@
       pick.train.no, 300, pick.pos.next);
     view.overlay = derived.sim ? { trains: derived.sim.trains, delays: derived.sim.delays } : null;
     document.getElementById('pl-clear').hidden = false;
+    document.getElementById('d-delay').textContent = '✓ 計画ダイヤに戻す';
     renderMonitor();
     if (ui.tab === 'diagram') renderDiagram();
+    if (ui.tab === 'dash') renderDash();
   });
   document.getElementById('pl-clear').addEventListener('click', function () {
     derived.sim = null; view.overlay = null;
     this.hidden = true;
+    document.getElementById('d-delay').textContent = '⚠ 遅延を注入';
     renderMonitor();
     if (ui.tab === 'diagram') renderDiagram();
+    if (ui.tab === 'dash') renderDash();
+  });
+
+  document.getElementById('d-play').addEventListener('click', function () { setPlaying(!play.on); });
+  document.getElementById('d-monitor').addEventListener('click', function () { switchTab('monitor'); });
+  document.getElementById('d-delay').addEventListener('click', function () {
+    document.getElementById(derived.sim ? 'pl-clear' : 'pl-delay').click();
+    renderDash();
   });
 
   // 運転整理
@@ -735,5 +892,5 @@
   } catch (e) {}
   renderTypeFilter();
   build();
-  switchTab('diagram');
+  switchTab('dash');
 })();
