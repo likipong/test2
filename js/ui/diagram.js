@@ -389,9 +389,8 @@
       var col = isLate ? 'var(--warn)' : ((typeMap[tr.typeId] || {}).color || '#fff');
       d.setAttribute('cx', x.toFixed(1));
       d.setAttribute('cy', self.yOfKm(p.km).toFixed(1));
-      d.setAttribute('fill', col);
-      // ドット自身の色で光らせる（ダッシュボードの輝点と同じ作り）
-      d.style.filter = 'drop-shadow(0 0 9px ' + col + ')';
+      // 芯の明るさとにじみは CSS 側で作る。ここでは列車の色だけ渡す
+      d.style.setProperty('--c', col);
       d.classList.toggle('late', isLate);
       d.style.display = '';
     });

@@ -152,8 +152,9 @@ thead .sticky-col{z-index:3;background:var(--panel2)}
 .st-name{fill:var(--ink);font-size:11px;font-family:var(--ui)}
 .st-name.turn{font-weight:700}
 .single-band{fill:color-mix(in srgb,var(--warn) 14%,transparent)}
-.hold-dot{fill:var(--warn);stroke:var(--plot-bg);stroke-width:1.4;
-  filter:drop-shadow(0 0 6px color-mix(in srgb,var(--warn) 85%,transparent))}
+/* 輝点は「白熱した芯＋その色のにじみ」。地色の枠で囲うと光が断ち切られる */
+.hold-dot{--c:var(--warn);fill:color-mix(in srgb,var(--c) 55%,#fff);stroke:none;
+  filter:drop-shadow(0 0 2.5px var(--c)) drop-shadow(0 0 7px var(--c))}
 .tip{position:absolute;pointer-events:none;background:color-mix(in srgb,var(--panel) 92%,transparent);
   border:1px solid var(--line-strong);backdrop-filter:blur(6px);
   border-radius:8px;padding:7px 10px;font-size:11px;box-shadow:var(--shadow);z-index:9;white-space:pre;display:none;
@@ -222,8 +223,15 @@ pre.out{background:var(--panel2);border:1px solid var(--line);border-radius:8px;
 .now-line{stroke:var(--ok);stroke-width:1.2;opacity:.95;
   filter:drop-shadow(0 0 6px color-mix(in srgb,var(--ok) 70%,transparent))}
 .now-tag{fill:var(--ok);font-family:var(--mono);font-size:10px;font-weight:600}
-.now-dot{stroke:var(--plot-bg);stroke-width:2}
-.now-dot.late{stroke:color-mix(in srgb,var(--warn) 45%,var(--plot-bg))}
+.now-dot{fill:color-mix(in srgb,var(--c,#fff) 48%,#fff);stroke:none;
+  filter:drop-shadow(0 0 3px var(--c,#fff)) drop-shadow(0 0 10px var(--c,#fff))}
+/* 明るい地では白い芯が飛ぶので、色そのものを芯にして地色の細い縁を付ける */
+:root[data-theme="light"] .now-dot{fill:color-mix(in srgb,var(--c,#000) 92%,#fff);
+  stroke:var(--plot-bg);stroke-width:1.6;
+  filter:drop-shadow(0 0 5px color-mix(in srgb,var(--c,#000) 55%,transparent))}
+:root[data-theme="light"] .hold-dot{fill:color-mix(in srgb,var(--c) 88%,#fff);
+  stroke:var(--plot-bg);stroke-width:1.2;
+  filter:drop-shadow(0 0 4px color-mix(in srgb,var(--c) 55%,transparent))}
 
 /* 状態表示ランプ */
 .chip.live{position:relative;padding-left:20px}
