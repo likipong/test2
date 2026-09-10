@@ -4,7 +4,7 @@
 
   var T = window.DiaTime, Line = window.DiaLine, Sch = window.DiaSchedule,
       Op = window.DiaOperation, Val = window.DiaValidate, Ex = window.DiaExport,
-      Dis = window.DiaDisrupt, Crew = window.DiaCrew,
+      Dis = window.DiaDisrupt, Crew = window.DiaCrew, Mon = window.DiaMonitor,
       Views = window.DiaViews, Editors = window.DiaEditors;
   var h = Views.h;
   var STORAGE = 'dia-editor-state-v1';
@@ -17,6 +17,8 @@
              checkLevel: { error: true, warn: true, info: true }, selected: null, crewSel: null };
 
   var dg = window.DiaDiagram.create(document.getElementById('dg'));
+  var mon = Mon.create(document.getElementById('mon'));
+  var play = { on: false, t: null, speed: 60, raf: null, last: 0, built: false };
   dg.onSelect = function (train) { selectTrain(train.no); };
 
   function fresh() {
@@ -56,6 +58,8 @@
     derived.crewParams = c.params;
     derived.issues = Val.validate(state.line, derived.trains, derived.duties, state.params, derived.crew);
     view.overlay = null;
+    view.sweep = true;
+    play.built = false;
     save();
     renderChips();
     renderAll();
@@ -75,7 +79,7 @@
       ['最速/最遅', T.fmtDuration(s.minRide) + ' / ' + T.fmtDuration(s.maxRide), ''],
       ['表定速度', s.bestSpeed + ' km/h', ''],
       ['始発/終着', (s.firstDep != null ? T.fmtTime(s.firstDep) : '-') + ' / ' + (s.lastArr != null ? T.fmtTime(s.lastArr) : '-'), ''],
-      ['支障', sum.error + ' 件', sum.error ? 'err' : 'ok']
+      ['支障', sum.error + ' 件', 'live' + (sum.error ? ' bad err' : ' ok')]
     ];
     items.forEach(function (it) {
       box.appendChild(h('span', { class: 'chip ' + it[2] }, [
@@ -90,6 +94,7 @@
   function renderAll() {
     if (ui.tab === 'diagram') renderDiagram();
     if (ui.tab === 'timetable') renderTimetable();
+    if (ui.tab === 'monitor') renderMonitor();
     if (ui.tab === 'duty') renderDuty();
     if (ui.tab === 'crew') renderCrew();
     if (ui.tab === 'check') renderCheck();
@@ -116,6 +121,8 @@
 
   function renderDiagram() {
     dg.render({ line: state.line, trains: derived.trains, types: state.types }, view);
+    view.sweep = false;
+    if (play.t != null) dg.showNow(play.t, liveTrains(), lateMap());
     var lg = document.getElementById('legend');
     lg.innerHTML = '';
     state.types.forEach(function (ty) {
@@ -188,6 +195,117 @@
       selectTrain(no); switchTab('diagram');
     }));
     mount('duty-table', Views.dutyTable(state, derived.duties));
+  }
+
+  /* ---------- 運行モニタ ---------- */
+  function timeSpan() {
+    if (!derived.trains.length) return [18000, 90000];
+    var a = derived.trains[0].depTime;
+    var b = Math.max.apply(null, derived.trains.map(function (t) { return t.arrTime; }));
+    return [a - 300, b + 300];
+  }
+
+  function liveTrains() {
+    return derived.sim ? derived.sim.trains : derived.trains;
+  }
+
+  function lateMap() {
+    var m = {};
+    if (derived.sim) derived.sim.delays.forEach(function (d) { m[d.no] = d.delay; });
+    return m;
+  }
+
+  function renderMonitor() {
+    if (!play.built) {
+      mon.build(state);
+      play.built = true;
+      var sp = timeSpan();
+      var sl = document.getElementById('pl-time');
+      sl.min = sp[0]; sl.max = sp[1];
+      if (play.t == null) play.t = sp[0];
+      sl.value = play.t;
+    }
+    paintClock();
+    var n = mon.update(play.t, liveTrains(), lateMap());
+    document.getElementById('pl-online').textContent = n || 0;
+    document.getElementById('pl-late').textContent = Object.keys(lateMap()).length;
+    renderBoards();
+  }
+
+  function paintClock() {
+    var c = document.getElementById('clock');
+    var parts = T.fmtTime(play.t, true).split(':');
+    c.innerHTML = '';
+    c.appendChild(document.createTextNode(parts[0] + ':' + parts[1]));
+    c.appendChild(h('small', { text: ':' + parts[2] }));
+    var tag = document.getElementById('clock-tag');
+    tag.textContent = play.on ? '運転中 ×' + play.speed : '停止中';
+    tag.classList.toggle('on', play.on);
+    document.getElementById('pl-play').textContent = play.on ? '❚❚ 一時停止' : '▶ 運転開始';
+    var hc = document.getElementById('hdr-clock');
+    hc.hidden = !play.on;
+    document.getElementById('hdr-time').textContent = T.fmtTime(play.t);
+  }
+
+  function renderBoards() {
+    var host = document.getElementById('mon-next');
+    var picks = [];
+    state.line.stations.forEach(function (st, i) {
+      if (st.depot || st.canTurn || st.crewBase) picks.push(i);
+    });
+    picks = picks.slice(0, 4);
+    host.innerHTML = '';
+    picks.forEach(function (idx) {
+      ['down', 'up'].forEach(function (dir) {
+        var list = Sch.nextDepartures(state.line, liveTrains(), idx, dir, play.t, 3);
+        if (!list.length) return;
+        var box = h('div', { class: 'board' }, [
+          h('h3', { text: state.line.stations[idx].name + '　' + (dir === 'down' ? '下り' : '上り') })
+        ]);
+        list.forEach(function (e) {
+          var ty = Views.typeOf(state.types, e.train.typeId);
+          var wait = e.dep - play.t;
+          box.appendChild(h('div', { class: 'brow' }, [
+            h('b', { text: T.fmtTime(e.dep) }),
+            h('span', { class: 'pill', style: 'background:' + ty.color, text: ty.short || ty.name }),
+            h('span', { text: state.line.stations[e.train.toIdx].name }),
+            h('span', { class: 't' + (wait < 120 ? ' soon' : ''),
+              text: wait < 60 ? 'まもなく' : 'あと ' + Math.round(wait / 60) + '分' })
+          ]));
+        });
+        host.appendChild(box);
+      });
+    });
+  }
+
+  function tick(ts) {
+    if (!play.on) return;
+    var dt = play.last ? (ts - play.last) / 1000 : 0;
+    play.last = ts;
+    var sp = timeSpan();
+    play.t += dt * play.speed;
+    if (play.t > sp[1]) { play.t = sp[0]; }
+    document.getElementById('pl-time').value = play.t;
+    if (ui.tab === 'monitor') renderMonitor();
+    else document.getElementById('hdr-time').textContent = T.fmtTime(play.t);
+    if (ui.tab === 'diagram') {
+      dg.showNow(play.t, liveTrains(), lateMap());
+      dg.followTime(play.t);
+    }
+    play.raf = requestAnimationFrame(tick);
+  }
+
+  function setPlaying(on) {
+    play.on = on;
+    play.last = 0;
+    if (on) {
+      if (play.t == null) play.t = timeSpan()[0];
+      play.raf = requestAnimationFrame(tick);
+    } else if (play.raf) {
+      cancelAnimationFrame(play.raf);
+      play.raf = null;
+    }
+    paintClock();
   }
 
   function renderCrew() {
@@ -507,6 +625,42 @@
   document.getElementById('board-st').addEventListener('change', function (e) { ui.boardSt = parseInt(e.target.value, 10); renderTimetable(); });
   document.getElementById('board-dir').addEventListener('change', function (e) { ui.boardDir = e.target.value; renderTimetable(); });
 
+  // 運行モニタ
+  document.getElementById('pl-play').addEventListener('click', function () { setPlaying(!play.on); });
+  document.getElementById('pl-reset').addEventListener('click', function () {
+    play.t = timeSpan()[0];
+    document.getElementById('pl-time').value = play.t;
+    renderMonitor();
+    if (ui.tab === 'diagram') { dg.showNow(play.t, liveTrains(), lateMap()); dg.followTime(play.t); }
+  });
+  document.getElementById('pl-speed').addEventListener('change', function (e) {
+    play.speed = parseInt(e.target.value, 10) || 60; paintClock();
+  });
+  document.getElementById('pl-time').addEventListener('input', function (e) {
+    play.t = parseFloat(e.target.value);
+    if (ui.tab === 'monitor') renderMonitor();
+    if (ui.tab === 'diagram') { dg.showNow(play.t, liveTrains(), lateMap()); dg.followTime(play.t); }
+  });
+
+  // 在線中の列車に遅延を与えて波及を見せる
+  document.getElementById('pl-delay').addEventListener('click', function () {
+    var online = Sch.onlineAt(state.line, derived.trains, play.t);
+    if (!online.length) { alert('いま在線している列車がないよ'); return; }
+    var pick = online[Math.floor(online.length / 2)];
+    derived.sim = Dis.simulate(state.line, derived.trains, derived.duties, state.params,
+      pick.train.no, 300, pick.pos.next);
+    view.overlay = derived.sim ? { trains: derived.sim.trains, delays: derived.sim.delays } : null;
+    document.getElementById('pl-clear').hidden = false;
+    renderMonitor();
+    if (ui.tab === 'diagram') renderDiagram();
+  });
+  document.getElementById('pl-clear').addEventListener('click', function () {
+    derived.sim = null; view.overlay = null;
+    this.hidden = true;
+    renderMonitor();
+    if (ui.tab === 'diagram') renderDiagram();
+  });
+
   // 運転整理
   document.getElementById('ds-run').addEventListener('click', function () {
     var no = parseInt(document.getElementById('ds-train').value, 10);
@@ -514,10 +668,13 @@
     if (!no) return;
     derived.sim = Dis.simulate(state.line, derived.trains, derived.duties, state.params, no, Math.round(min * 60));
     view.overlay = derived.sim ? { trains: derived.sim.trains, delays: derived.sim.delays } : null;
+    document.getElementById('pl-clear').hidden = false;
     renderDisrupt();
   });
   document.getElementById('ds-clear').addEventListener('click', function () {
-    derived.sim = null; view.overlay = null; renderDisrupt();
+    derived.sim = null; view.overlay = null;
+    document.getElementById('pl-clear').hidden = true;
+    renderDisrupt();
   });
 
   // 出力
@@ -553,6 +710,23 @@
       }
     });
   });
+
+  // 起動演出
+  (function boot() {
+    var box = document.getElementById('boot');
+    if (!box) return;
+    var log = document.getElementById('boot-log');
+    var msgs = ['線区諸元を読み込み中…', 'パターンダイヤを生成中…', '待避・折返しを検査中…', '車両運用・仕業を組成中…', 'SYSTEM ONLINE'];
+    var i = 0;
+    var iv = setInterval(function () {
+      i++;
+      if (log && msgs[i]) log.textContent = msgs[i];
+      if (i >= msgs.length - 1) clearInterval(iv);
+    }, 280);
+    var close = function () { clearInterval(iv); box.classList.add('done'); };
+    setTimeout(close, 1650);
+    box.addEventListener('click', close);
+  })();
 
   // 起動
   try {

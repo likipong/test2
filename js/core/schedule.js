@@ -290,6 +290,52 @@
     return s.dep != null ? s.dep : s.arr;
   }
 
+  /** 指定時刻における列車の在線位置。走行していなければ null
+   *  戻り値 { km, stopped, idx | from, to, next, ratio }
+   */
+  function positionAt(line, train, t) {
+    if (t < train.depTime || t > train.arrTime) return null;
+    var st = train.stops;
+    for (var i = 0; i < st.length - 1; i++) {
+      var a = st[i], b = st[i + 1];
+      var dep = a.dep != null ? a.dep : a.arr;
+      if (a.arr != null && t >= a.arr && t < dep) {
+        return { km: line.stations[a.idx].km, stopped: true, idx: a.idx, next: b.idx, ratio: 0 };
+      }
+      if (t >= dep && t <= b.arr) {
+        var span = Math.max(1, b.arr - dep);
+        var r = (t - dep) / span;
+        var k0 = line.stations[a.idx].km, k1 = line.stations[b.idx].km;
+        return { km: k0 + (k1 - k0) * r, stopped: false, from: a.idx, to: b.idx, next: b.idx, ratio: r };
+      }
+    }
+    var last = st[st.length - 1];
+    return { km: line.stations[last.idx].km, stopped: true, idx: last.idx, next: last.idx, ratio: 1 };
+  }
+
+  /** 指定時刻に在線しているすべての列車 */
+  function onlineAt(line, trains, t) {
+    var out = [];
+    trains.forEach(function (tr) {
+      var p = positionAt(line, tr, t);
+      if (p) out.push({ train: tr, pos: p });
+    });
+    return out;
+  }
+
+  /** 駅の次の発車（案内表示用） */
+  function nextDepartures(line, trains, idx, dir, t, n) {
+    var out = [];
+    trains.forEach(function (tr) {
+      if (tr.dir !== dir) return;
+      var s = stopAt(tr, idx);
+      if (!s || !s.stop || s.dep == null || s.dep < t) return;
+      out.push({ train: tr, dep: s.dep });
+    });
+    out.sort(function (a, b) { return a.dep - b.dep; });
+    return out.slice(0, n || 4);
+  }
+
   /** ダイヤ全体の統計 */
   function stats(line, trains, duties) {
     var down = trains.filter(function (t) { return t.dir === 'down'; });
@@ -319,6 +365,9 @@
     buildTrain: buildTrain,
     applyHolds: applyHolds,
     recomputeFrom: recomputeFrom,
+    positionAt: positionAt,
+    onlineAt: onlineAt,
+    nextDepartures: nextDepartures,
     stopAt: stopAt,
     timeAt: timeAt,
     stats: stats

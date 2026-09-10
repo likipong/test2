@@ -268,6 +268,54 @@ test('仕業 CSV と行路表が生成できる', () => {
   assert.ok(/列車/.test(sheet));
 });
 
+test('走行中の列車に遅延を与えても波及が発散しない', () => {
+  const st = baseState();
+  const { trains } = Sch.buildTimetable(st);
+  const { duties } = Op.assignDuties(st.line, trains, st.params);
+
+  // 待避のある朝ラッシュ帯を含む数点で、途中駅から遅延を与える
+  for (const clock of ['07:30', '08:15', '17:00']) {
+    const t = T.parseTime(clock);
+    const online = Sch.onlineAt(st.line, trains, t);
+    assert.ok(online.length, `${clock} に在線列車があること`);
+    for (const o of [online[0], online[Math.floor(online.length / 2)], online[online.length - 1]]) {
+      const res = Dis.simulate(st.line, trains, duties, st.params, o.train.no, 300, o.pos.next);
+      assert.ok(res, 'シミュレーションが成立すること');
+      assert.ok(res.stats.maxDelay <= 300 + 1,
+        `${clock} ${o.train.no}列車: 波及先の遅延 ${res.stats.maxDelay} が与えた遅延を超えた`);
+      assert.ok(res.stats.affected < trains.length / 2,
+        `${clock} ${o.train.no}列車: ${res.stats.affected} 本に波及していて多すぎる`);
+      for (const c of res.trains) {
+        assert.ok(Number.isFinite(c.arrTime) && c.arrTime < 60 * 3600,
+          `${c.no}列車の時刻が発散している`);
+      }
+    }
+  }
+});
+
+test('遅延しても計画ダイヤ上の順序が入れ替わらない', () => {
+  const st = baseState();
+  const { trains } = Sch.buildTimetable(st);
+  const { duties } = Op.assignDuties(st.line, trains, st.params);
+  const target = trains.find(t => t.dir === 'down' && t.depTime >= 27000);
+  const res = Dis.simulate(st.line, trains, duties, st.params, target.no, 240);
+  const after = {};
+  res.trains.forEach(t => { after[t.no] = t; });
+
+  for (let idx = 0; idx < st.line.stations.length; idx++) {
+    for (const dir of ['down', 'up']) {
+      const planned = trains.filter(t => t.dir === dir && Sch.timeAt(t, idx) != null)
+        .sort((a, b) => Sch.timeAt(a, idx) - Sch.timeAt(b, idx));
+      for (let i = 1; i < planned.length; i++) {
+        const a = Sch.timeAt(after[planned[i - 1].no], idx);
+        const b = Sch.timeAt(after[planned[i].no], idx);
+        assert.ok(b >= a + st.params.minHeadway - 1,
+          `${st.line.stations[idx].name}で${planned[i - 1].no}と${planned[i].no}の順序・時隔が崩れた`);
+      }
+    }
+  }
+});
+
 test('保存した JSON を読み戻すと同じダイヤになる', () => {
   const st = baseState();
   const restored = Ex.fromJSON(Ex.toJSON(st));

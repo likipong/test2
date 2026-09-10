@@ -11,6 +11,16 @@
 </head>
 <body>
 
+<div id="boot" class="boot">
+  <div class="boot-inner">
+    <div class="boot-mark">◈</div>
+    <div class="boot-title">運転ダイヤ作成システム</div>
+    <div class="boot-sub">TRAIN DIAGRAM &amp; CREW SCHEDULING</div>
+    <div class="boot-bar"><i></i></div>
+    <div class="boot-log" id="boot-log">線区諸元を読み込み中…</div>
+  </div>
+</div>
+
 <header class="appbar">
   <div class="brand">
     <b id="ttl-line">みどり線</b>
@@ -18,6 +28,7 @@
     <span class="hint">運転ダイヤ作成</span>
   </div>
   <button class="primary" id="btn-build">ダイヤ作成</button>
+  <span class="chip live hdr-clock" id="hdr-clock" hidden>運転中 <b id="hdr-time">05:00</b></span>
   <div class="chips" id="chips"></div>
   <div class="spacer"></div>
   <div class="tools">
@@ -31,6 +42,7 @@
 
 <nav class="tabs" id="tabs">
   <button data-view="diagram" aria-selected="true">ダイヤグラム</button>
+  <button data-view="monitor" aria-selected="false">運行モニタ</button>
   <button data-view="timetable" aria-selected="false">時刻表</button>
   <button data-view="duty" aria-selected="false">運用</button>
   <button data-view="crew" aria-selected="false">仕業</button>
@@ -63,6 +75,45 @@
     <div class="diagram" id="dg"></div>
     <div class="legend" id="legend"></div>
     <div class="panel" id="dg-detail" style="margin-top:12px"><span class="hint">スジをクリックすると列車の詳細と、その運用が強調表示されるよ</span></div>
+  </section>
+
+  <!-- 運行モニタ -->
+  <section class="view" id="v-monitor">
+    <div class="panel play">
+      <div class="clock-wrap">
+        <div class="clock" id="clock">05:00<small>:00</small></div>
+        <div class="clock-tag" id="clock-tag">停止中</div>
+      </div>
+      <div class="play-ctrl">
+        <div class="row">
+          <button class="primary" id="pl-play">▶ 運転開始</button>
+          <button id="pl-reset">始発へ</button>
+          <label class="f">速度
+            <select id="pl-speed">
+              <option value="1">実時間</option>
+              <option value="30">30倍</option>
+              <option value="60" selected>60倍</option>
+              <option value="120">120倍</option>
+              <option value="300">300倍</option>
+            </select>
+          </label>
+          <button id="pl-delay">⚠ 遅延を注入</button>
+          <button id="pl-clear" hidden>復旧</button>
+          <span class="chip">在線 <b id="pl-online">0</b> 本</span>
+          <span class="chip">遅延 <b id="pl-late">0</b> 本</span>
+        </div>
+        <input type="range" id="pl-time" min="0" max="1" step="5" value="0">
+      </div>
+    </div>
+    <div class="panel">
+      <h2>在線表示盤</h2>
+      <div id="mon" class="mon"></div>
+      <div class="legend">
+        <span>▶ が列車。停車中は明滅し、遅延中は橙になる</span>
+        <span>太い丸＝折返し可　橙＝待避可　白＝車庫　駅名の白抜き＝乗務員基地</span>
+      </div>
+    </div>
+    <div class="panel"><h2>主要駅の発車案内</h2><div id="mon-next" class="boards"></div></div>
   </section>
 
   <!-- 時刻表 -->
@@ -176,6 +227,7 @@
 <script src="js/core/disrupt.js"></script>
 <script src="js/core/exporters.js"></script>
 <script src="js/ui/diagram.js"></script>
+<script src="js/ui/monitor.js"></script>
 <script src="js/ui/views.js"></script>
 <script src="js/ui/editors.js"></script>
 <script src="js/ui/app.js"></script>

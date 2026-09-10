@@ -63,9 +63,34 @@
 
     this.x = function (t) { return PAD_LEFT + (t - t0) / 60 * view.pxPerMin; };
     this.y = function (idx) { return ys.y[idx]; };
+    this.yOfKm = function (km) {
+      var sts = line.stations;
+      for (var i = 0; i < sts.length - 1; i++) {
+        if (km <= sts[i + 1].km || i === sts.length - 2) {
+          var span = sts[i + 1].km - sts[i].km || 1;
+          var r = Math.max(0, Math.min(1, (km - sts[i].km) / span));
+          return ys.y[i] + (ys.y[i + 1] - ys.y[i]) * r;
+        }
+      }
+      return ys.y[0];
+    };
 
     // --- 作図面 ---
     var svg = el('svg', { width: W, height: H, viewBox: '0 0 ' + W + ' ' + H });
+
+    var defs = el('defs');
+    var f = el('filter', { id: 'dg-neon', x: '-50%', y: '-50%', width: '200%', height: '200%' });
+    f.appendChild(el('feGaussianBlur', { stdDeviation: 1.8, result: 'b' }));
+    var mg = el('feMerge');
+    mg.appendChild(el('feMergeNode', { in: 'b' }));
+    mg.appendChild(el('feMergeNode', { in: 'SourceGraphic' }));
+    f.appendChild(mg);
+    defs.appendChild(f);
+    var clip = el('clipPath', { id: 'dg-sweep' });
+    var clipRect = el('rect', { x: 0, y: 0, width: W, height: H });
+    clip.appendChild(clipRect);
+    defs.appendChild(clip);
+    svg.appendChild(defs);
 
     // 単線区間の帯
     line.sections.forEach(function (sec, i) {
@@ -118,6 +143,26 @@
       });
     });
     svg.appendChild(g);
+
+    // 生成直後は左から掃引しながらスジを描く
+    if (view.sweep && !prefersReducedMotion()) {
+      g.setAttribute('clip-path', 'url(#dg-sweep)');
+      var beam = el('line', { x1: 0, y1: 0, x2: 0, y2: H, class: 'sweep-beam' });
+      svg.appendChild(beam);
+      var t0 = null, dur = 900;
+      var step = function (ts) {
+        if (t0 == null) t0 = ts;
+        var r = Math.min(1, (ts - t0) / dur);
+        var e = 1 - Math.pow(1 - r, 3);
+        clipRect.setAttribute('width', (W * e).toFixed(1));
+        beam.setAttribute('x1', (W * e).toFixed(1));
+        beam.setAttribute('x2', (W * e).toFixed(1));
+        beam.setAttribute('opacity', (1 - r * r).toFixed(3));
+        if (r < 1) requestAnimationFrame(step);
+        else { g.removeAttribute('clip-path'); beam.remove(); }
+      };
+      requestAnimationFrame(step);
+    }
 
     // 遅延ダイヤの重ね描き（運転整理シミュレーション）
     if (view.overlay && view.overlay.trains && view.overlay.trains.length) {
@@ -183,6 +228,7 @@
     this.elSt.innerHTML = ''; this.elSt.appendChild(ssvg);
 
     this.bindPointer(typeMap);
+    this.nowG = null; this.dotMap = {};
     if (this.selected) this.setSelection(this.selected);
   };
 
@@ -255,7 +301,68 @@
     for (var i = 0; i < groups.length; i++) {
       var on = !!set[groups[i].dataset.no];
       groups[i].classList.toggle('sel', on);
+      if (on) groups[i].setAttribute('filter', 'url(#dg-neon)');
+      else groups[i].removeAttribute('filter');
       groups[i].classList.toggle('dim', !!any && !on);
+    }
+  };
+
+  /** 模擬時刻の現在位置（縦線と在線の光点）を描く */
+  Diagram.prototype.showNow = function (t, trains, delays) {
+    if (!this.svg || !this.x) return 0;
+    var line = this.state.line, self = this;
+    if (!this.nowG || this.nowG.ownerSVGElement !== this.svg) {
+      this.nowG = el('g', { class: 'now-layer', filter: 'url(#dg-neon)' });
+      this.nowLine = el('line', { class: 'now-line', y1: 0, y2: this.svg.getAttribute('height') });
+      this.nowG.appendChild(this.nowLine);
+      this.nowDots = el('g', {});
+      this.nowG.appendChild(this.nowDots);
+      this.nowTag = el('text', { class: 'now-tag', y: 11 });
+      this.nowG.appendChild(this.nowTag);
+      this.svg.appendChild(this.nowG);
+      this.dotMap = {};
+    }
+    this.nowG.style.display = '';
+    var x = this.x(t);
+    this.nowLine.setAttribute('x1', x);
+    this.nowLine.setAttribute('x2', x);
+    this.nowTag.setAttribute('x', x + 5);
+    this.nowTag.textContent = T.fmtTime(t);
+
+    var typeMap = {};
+    this.state.types.forEach(function (ty) { typeMap[ty.id] = ty; });
+    var live = {}, n = 0;
+    var Schd = root.DiaSchedule;
+    Schd.onlineAt(line, trains || this.state.trains, t).forEach(function (o) {
+      var p = o.pos, tr = o.train;
+      live[tr.no] = true; n++;
+      var d = self.dotMap[tr.no];
+      if (!d) {
+        d = self.dotMap[tr.no] = el('circle', { r: 3.1, class: 'now-dot' });
+        self.nowDots.appendChild(d);
+      }
+      d.setAttribute('cx', x.toFixed(1));
+      d.setAttribute('cy', self.yOfKm(p.km).toFixed(1));
+      d.setAttribute('fill', (typeMap[tr.typeId] || {}).color || '#fff');
+      d.classList.toggle('late', !!(delays && delays[tr.no]));
+      d.style.display = '';
+    });
+    Object.keys(this.dotMap).forEach(function (no) {
+      if (!live[no]) self.dotMap[no].style.display = 'none';
+    });
+    return n;
+  };
+
+  Diagram.prototype.hideNow = function () {
+    if (this.nowG) this.nowG.style.display = 'none';
+  };
+
+  /** 再生中の追従スクロール（画面外に出そうなときだけ寄せる） */
+  Diagram.prototype.followTime = function (sec) {
+    if (!this.x) return;
+    var x = this.x(sec), w = this.elPlot.clientWidth, left = this.elPlot.scrollLeft;
+    if (x < left + w * 0.25 || x > left + w * 0.75) {
+      this.elPlot.scrollLeft = Math.max(0, x - w * 0.35);
     }
   };
 
@@ -265,6 +372,10 @@
     var target = this.x(sec) - this.elPlot.clientWidth / 2;
     this.elPlot.scrollLeft = Math.max(0, target);
   };
+
+  function prefersReducedMotion() {
+    return window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  }
 
   root.DiaDiagram = { create: function (host) { return new Diagram(host); } };
 })(window);

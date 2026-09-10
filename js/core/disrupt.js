@@ -1,72 +1,96 @@
 /* 運転整理（遅延波及）シミュレーション
  *
- * ある列車に遅延を与えたとき、最小運転時隔と最小折返し時分の制約を通じて
+ * ある列車に遅延を与えたとき、最小運転時隔と最小折返し時分を通じて
  * 後続列車・同一運用の次列車へどう波及するかを求める。
- * 計画ダイヤの列車順序は保たれる（待避なしで追い抜きは起きない）前提。
  *
- * 回復運転は見込まない（運転時分・停車時分に余裕を持たせていないため）。
+ * 計画ダイヤ上の順序（待避による追い抜きを含む）はそのまま保つ。
+ * 各駅の着発を「計画時刻の早い順」に 1 度だけ確定させていくので、
+ * 時刻は前へしか動かず、押し合いで発散することがない。
+ *
+ *   着 = max( 計画の着 + 与えた遅延, 前駅の発 + 計画の走行時分 )
+ *   発 = max( 計画の発 + 与えた遅延, 着 + 計画の停車時分,
+ *             同じ駅・同じ方向の直前列車 + 最小運転時隔,
+ *             （始発なら）折返し元の着 + 最小折返し時分 )
+ *
+ * 回復運転は見込まない（運転時分・停車時分に余裕時分を設定していないため）。
  */
 (function (root) {
   'use strict';
 
-  var Sch = root.DiaSchedule || (typeof require !== 'undefined' ? require('./schedule.js') : null);
-
-  var MAX_ITER = 60;
-
-  function simulate(line, trains, duties, params, targetNo, delaySec) {
+  function simulate(line, trains, duties, params, targetNo, delaySec, fromIdx) {
     var base = {};
     trains.forEach(function (t) { base[t.no] = t; });
+    if (!base[targetNo]) return null;
 
     var clones = trains.map(function (t) { return JSON.parse(JSON.stringify(t)); });
     var byNo = {};
     clones.forEach(function (t) { byNo[t.no] = t; });
 
-    var nextOf = {};
+    // 運用の前列車（折返し元）
+    var prevOf = {};
     (duties || []).forEach(function (d) {
-      for (var i = 0; i < d.trains.length - 1; i++) nextOf[d.trains[i].no] = d.trains[i + 1].no;
+      for (var i = 0; i < d.trains.length - 1; i++) prevOf[d.trains[i + 1].no] = d.trains[i].no;
     });
 
+    // 与える遅延：対象列車の指定駅以降
     var target = byNo[targetNo];
-    if (!target) return null;
-    shiftFrom(target, 0, delaySec);
-
-    // 計画ダイヤ上の列車順序（駅ごと・方向ごと）
-    var seq = plannedOrder(line, trains);
+    var startPos = fromIdx != null ? posOf(target, fromIdx) : 0;
+    if (startPos < 0) startPos = 0;
 
     var min = params.minHeadway || 0, turn = params.minTurn || 0;
-    for (var it = 0; it < MAX_ITER; it++) {
-      var changed = false;
 
-      // 続行時隔
-      seq.forEach(function (row) {
-        for (var i = 1; i < row.list.length; i++) {
-          var a = byNo[row.list[i - 1]], b = byNo[row.list[i]];
-          if (!a || !b) continue;
-          var ta = Sch.timeAt(a, row.idx), tb = Sch.timeAt(b, row.idx);
-          if (ta == null || tb == null) continue;
-          if (tb < ta + min) {
-            shiftFrom(b, posOf(b, row.idx), ta + min - tb);
-            changed = true;
-          }
+    // 計画ダイヤ上の時刻の早い順に、着発をひとつずつ確定させる
+    var nodes = [];
+    clones.forEach(function (tr) {
+      tr.stops.forEach(function (s, i) {
+        nodes.push({ tr: tr, i: i, key: s.dep != null ? s.dep : s.arr });
+      });
+    });
+    nodes.sort(function (a, b) { return a.key - b.key || a.tr.no - b.tr.no || a.i - b.i; });
+
+    var lastAt = {};   // 駅・方向ごとの直前列車の発（終着なら着）
+    nodes.forEach(function (nd) {
+      var tr = nd.tr, i = nd.i, s = tr.stops[i];
+      var plan = base[tr.no].stops[i];
+      var extra = (tr.no === targetNo && i >= startPos) ? delaySec : 0;
+
+      if (s.arr != null) {
+        var t = plan.arr + extra;
+        if (i > 0) {
+          var pj = tr.stops[i - 1], pp = base[tr.no].stops[i - 1];
+          var run = plan.arr - (pp.dep != null ? pp.dep : pp.arr);
+          t = Math.max(t, (pj.dep != null ? pj.dep : pj.arr) + run);
         }
-      });
+        s.arr = t;
+      }
 
-      // 折返し
-      clones.forEach(function (t) {
-        var n = nextOf[t.no] != null ? byNo[nextOf[t.no]] : null;
-        if (!n) return;
-        var need = t.arrTime + turn;
-        if (n.depTime < need) { shiftFrom(n, 0, need - n.depTime); changed = true; }
-      });
+      var key = s.idx + ':' + tr.dir;
+      var basis;
+      if (s.dep != null) {
+        var d = plan.dep + extra;
+        if (s.arr != null) d = Math.max(d, s.arr + (plan.dep - plan.arr));
+        if (i === 0 && prevOf[tr.no] != null && byNo[prevOf[tr.no]]) {
+          d = Math.max(d, byNo[prevOf[tr.no]].arrTime + turn);
+        }
+        if (lastAt[key] != null) d = Math.max(d, lastAt[key] + min);
+        s.dep = d;
+        basis = d;
+      } else {
+        var a = s.arr;
+        if (lastAt[key] != null) a = Math.max(a, lastAt[key] + min);
+        s.arr = a;
+        basis = a;
+      }
+      lastAt[key] = basis;
 
-      if (!changed) break;
-    }
+      if (i === tr.stops.length - 1) tr.arrTime = s.arr;
+      if (i === 0) tr.depTime = s.dep;
+    });
 
     // 遅延量の集計
     var delays = [];
     clones.forEach(function (c) {
-      var o = base[c.no];
-      var d = 0;
+      var o = base[c.no], d = 0;
       c.stops.forEach(function (s, i) {
         var os = o.stops[i];
         if (s.dep != null && os.dep != null) d = Math.max(d, s.dep - os.dep);
@@ -92,42 +116,6 @@
         lastAffectedArr: recovery
       }
     };
-  }
-
-  /** 駅・方向ごとの計画ダイヤ上の通過順 */
-  function plannedOrder(line, trains) {
-    var rows = [];
-    line.stations.forEach(function (st, idx) {
-      ['down', 'up'].forEach(function (dir) {
-        var list = [];
-        trains.forEach(function (t) {
-          if (t.dir !== dir) return;
-          var v = Sch.timeAt(t, idx);
-          if (v != null) list.push({ no: t.no, t: v });
-        });
-        list.sort(function (a, b) { return a.t - b.t; });
-        if (list.length > 1) rows.push({ idx: idx, dir: dir, list: list.map(function (x) { return x.no; }) });
-      });
-    });
-    return rows;
-  }
-
-  /** stops の pos 番目以降を delta 秒ずらす
-   *  起点が停車駅なら「その駅で抑止された」とみなして着時刻は動かさない。
-   *  通過駅・終着駅は抑止できないので、その駅の時刻ごとずらす（手前で徐行・抑止した扱い）。
-   */
-  function shiftFrom(train, pos, delta) {
-    if (delta <= 0 || pos < 0) return;
-    var head = train.stops[pos];
-    var holdable = head.stop && head.arr != null && head.dep != null;
-    for (var i = pos; i < train.stops.length; i++) {
-      var s = train.stops[i];
-      if (s.arr != null && (i > pos || !holdable)) s.arr += delta;
-      if (s.dep != null) s.dep += delta;
-      if (s.arr != null && s.dep != null && s.arr > s.dep) s.dep = s.arr;
-    }
-    train.depTime = train.stops[0].dep;
-    train.arrTime = train.stops[train.stops.length - 1].arr;
   }
 
   function posOf(train, idx) {
