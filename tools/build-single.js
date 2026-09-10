@@ -13,7 +13,7 @@ const read = p => fs.readFileSync(path.join(root, p), 'utf8');
 
 let out = html
   .replace(/[ \t]*<link rel="stylesheet" href="([^"]+)">\n?/g,
-    (_, href) => '<style>\n' + read(href) + '\n</style>\n')
+    (m, href) => /^https?:/.test(href) ? m : '<style>\n' + read(href) + '\n</style>\n')
   .replace(/[ \t]*<script src="([^"]+)"><\/script>\n?/g,
     (_, src) => '<script>\n' + read(src) + '\n</script>\n');
 

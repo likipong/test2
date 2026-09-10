@@ -151,7 +151,7 @@
         var ty = typeOf(types, tr.typeId);
         var r = svgEl('rect', {
           x: x(tr.depTime), y: y + 3, width: Math.max(2, x(tr.arrTime) - x(tr.depTime)), height: rowH - 8,
-          rx: 2, fill: ty.color, opacity: tr.dir === 'down' ? 0.95 : 0.6, class: 'duty-bar'
+          rx: 2, fill: ty.color, opacity: tr.dir === 'down' ? 0.95 : 0.72, class: 'duty-bar'
         });
         r.dataset.no = tr.no;
         r.appendChild(svgEl('title', {}, tr.no + '列車 ' + (ty.short || ty.name) + ' ' +
@@ -222,12 +222,12 @@
           var ty = typeOf(types, l.typeId);
           g.appendChild(svgEl('rect', {
             x: x(l.dep), y: y + 3, width: Math.max(2, x(l.arr) - x(l.dep)), height: rowH - 8,
-            rx: 2, fill: ty.color, opacity: l.dir === 'down' ? 0.95 : 0.6
+            rx: 2, fill: ty.color, opacity: l.dir === 'down' ? 0.95 : 0.72
           }));
         } else if (l.kind === 'break') {
           g.appendChild(svgEl('rect', {
-            x: x(l.from), y: y + 6, width: Math.max(2, x(l.to) - x(l.from)), height: rowH - 14,
-            rx: 2, fill: 'var(--warn)', opacity: 0.55
+            x: x(l.from), y: y + 7, width: Math.max(2, x(l.to) - x(l.from)), height: rowH - 16,
+            rx: 1.5, fill: 'var(--warn)', opacity: 0.85
           }));
         }
       });

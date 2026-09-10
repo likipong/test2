@@ -12,7 +12,7 @@
   var state = load() || fresh();
   var derived = { trains: [], duties: [], dutyOf: new Map(), crew: [], crewOf: new Map(),
                   crewParams: null, issues: [], notes: [] };
-  var view = { pxPerMin: 4, pxPerKm: 26, yMode: 'km', hidden: {}, t0: null, t1: null };
+  var view = { pxPerMin: 4, pxPerKm: 26, yMode: 'km', hidden: {}, t0: null, t1: null, glow: true };
   var ui = { tab: 'diagram', ttDir: 'down', ttHour: null, ttArr: false, boardSt: 0, boardDir: 'down',
              checkLevel: { error: true, warn: true, info: true }, selected: null, crewSel: null };
 
@@ -32,6 +32,8 @@
       if (!o || !o.line) return null;
       var d = Line.defaultParams();
       for (var k in d) if (o.params[k] === undefined) o.params[k] = d[k];
+      var recolor = { '#2563eb': '#49a8ff', '#dc2626': '#ff6b5e' };
+      (o.types || []).forEach(function (t) { if (recolor[t.color]) t.color = recolor[t.color]; });
       return o;
     } catch (e) { return null; }
   }
@@ -443,10 +445,10 @@
     build(); renderAll();
   });
   document.getElementById('btn-theme').addEventListener('click', function () {
-    var cur = document.documentElement.getAttribute('data-theme');
-    var next = cur === 'dark' ? 'light' : cur === 'light' ? '' : 'dark';
+    var next = document.documentElement.getAttribute('data-theme') === 'light' ? '' : 'light';
     if (next) document.documentElement.setAttribute('data-theme', next);
     else document.documentElement.removeAttribute('data-theme');
+    this.title = next === 'light' ? '暗い表示に戻す' : '明るい表示にする';
     try { localStorage.setItem('dia-theme', next); } catch (e) {}
   });
 
@@ -463,6 +465,9 @@
   });
   document.getElementById('ymode').addEventListener('change', function (e) {
     view.yMode = e.target.value; renderDiagram();
+  });
+  document.getElementById('glow').addEventListener('change', function (e) {
+    view.glow = e.target.checked; renderDiagram();
   });
   document.getElementById('range-from').addEventListener('change', applyRange);
   document.getElementById('range-to').addEventListener('change', applyRange);

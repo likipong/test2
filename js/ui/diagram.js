@@ -90,29 +90,31 @@
       }));
     });
 
-    // 列車スジ
+    // 列車スジ：ハロー・本体・芯の 3 枚を 1 つの g にまとめる
     var g = el('g', {});
     var self = this;
+    var glow = view.glow !== false;
     shown.forEach(function (tr) {
       var pts = points(tr, self.x, ys.y);
       if (pts.length < 2) return;
       var d = pts.map(function (p) { return p[0].toFixed(1) + ',' + p[1].toFixed(1); }).join(' ');
       var color = (typeMap[tr.typeId] || {}).color || '#888';
-      var hit = el('polyline', { points: d, class: 'train-hit' });
-      hit.dataset.no = tr.no;
-      g.appendChild(hit);
-      var pl = el('polyline', {
-        points: d, class: 'train-line ' + tr.dir, stroke: color,
-        'stroke-dasharray': tr.dir === 'up' ? null : null
-      });
-      pl.dataset.no = tr.no;
-      g.appendChild(pl);
+
+      var tg = el('g', { class: 'train' });
+      tg.dataset.no = tr.no;
+      tg.appendChild(el('polyline', { points: d, class: 'train-hit' }));
+      if (glow) tg.appendChild(el('polyline', { points: d, class: 'train-glow', stroke: color }));
+      tg.appendChild(el('polyline', { points: d, class: 'train-line ' + tr.dir, stroke: color }));
+      if (glow) tg.appendChild(el('polyline', { points: d, class: 'train-core' }));
+      g.appendChild(tg);
 
       // 待避（抑止）を点で示す
       (tr.holds || []).forEach(function (h) {
         var s = Sch.stopAt(tr, h.idx);
         if (!s) return;
-        g.appendChild(el('circle', { cx: self.x((s.arr + s.dep) / 2), cy: ys.y[h.idx], r: 2.2, class: 'hold-dot' }));
+        var cx = self.x((s.arr + s.dep) / 2);
+        if (glow) g.appendChild(el('circle', { cx: cx, cy: ys.y[h.idx], r: 5, class: 'hold-halo' }));
+        g.appendChild(el('circle', { cx: cx, cy: ys.y[h.idx], r: 2, class: 'hold-dot' }));
       });
     });
     svg.appendChild(g);
@@ -146,7 +148,7 @@
         var up = tr.dir === 'up';
         lab.appendChild(el('text', {
           x: xx + 3, y: yy + (up ? -4 : 11), class: 'axis-text',
-          fill: (typeMap[tr.typeId] || {}).color
+          fill: (typeMap[tr.typeId] || {}).color, opacity: 0.9
         }, tr.no));
       });
       svg.appendChild(lab);
@@ -161,7 +163,7 @@
     for (var h = Math.ceil(t0 / 1800) * 1800; h <= t1; h += 1800) {
       var isHour = h % 3600 === 0;
       tsvg.appendChild(el('line', { x1: this.x(h), y1: isHour ? 12 : 20, x2: this.x(h), y2: 30, class: 'tick' + (isHour ? ' hour' : '') }));
-      if (isHour || view.pxPerMin >= 8) {
+      if (isHour || view.pxPerMin >= 6) {
         tsvg.appendChild(el('text', { x: this.x(h) + 3, y: 11, class: 'axis-text' }, T.fmtTime(h)));
       }
     }
@@ -214,9 +216,9 @@
     this.state.trains.forEach(function (t) { trainByNo[t.no] = t; });
 
     this.svg.addEventListener('mousemove', function (ev) {
-      var el2 = ev.target;
-      if (!el2.dataset || !el2.dataset.no) { self.tip.style.display = 'none'; return; }
-      var tr = trainByNo[el2.dataset.no];
+      var g = ev.target.closest ? ev.target.closest('.train') : null;
+      if (!g) { self.tip.style.display = 'none'; return; }
+      var tr = trainByNo[g.dataset.no];
       if (!tr) return;
       var line = self.state.line;
       var ty = typeMap[tr.typeId] || {};
@@ -236,9 +238,9 @@
     });
     this.svg.addEventListener('mouseleave', function () { self.tip.style.display = 'none'; });
     this.svg.addEventListener('click', function (ev) {
-      var no = ev.target.dataset && ev.target.dataset.no;
-      if (!no) return;
-      if (self.onSelect) self.onSelect(trainByNo[no]);
+      var g = ev.target.closest ? ev.target.closest('.train') : null;
+      if (!g) return;
+      if (self.onSelect) self.onSelect(trainByNo[g.dataset.no]);
     });
   };
 
@@ -248,10 +250,12 @@
     if (!this.svg) return;
     var set = {};
     (nos || []).forEach(function (n) { set[n] = true; });
-    var lines = this.svg.querySelectorAll('.train-line');
-    for (var i = 0; i < lines.length; i++) {
-      lines[i].classList.toggle('sel', !!set[lines[i].dataset.no]);
-      lines[i].style.opacity = (!nos || !nos.length || set[lines[i].dataset.no]) ? '' : '0.28';
+    var groups = this.svg.querySelectorAll('.train');
+    var any = nos && nos.length;
+    for (var i = 0; i < groups.length; i++) {
+      var on = !!set[groups[i].dataset.no];
+      groups[i].classList.toggle('sel', on);
+      groups[i].classList.toggle('dim', !!any && !on);
     }
   };
 
