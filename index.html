@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>運転ダイヤ作成 — 地方都市地下鉄向け</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<header class="appbar">
+  <div class="brand">
+    <b id="ttl-line">みどり線</b>
+    <span id="ttl-company">碧波市交通局</span>
+    <span class="hint">運転ダイヤ作成</span>
+  </div>
+  <button class="primary" id="btn-build">ダイヤ作成</button>
+  <div class="chips" id="chips"></div>
+  <div class="spacer"></div>
+  <button id="btn-save">保存</button>
+  <button id="btn-load">読込</button>
+  <button id="btn-reset">初期化</button>
+  <button class="ghost" id="btn-theme" title="表示テーマ">◐</button>
+  <input type="file" id="file-in" accept=".json,application/json" hidden>
+</header>
+
+<nav class="tabs" id="tabs">
+  <button data-view="diagram" aria-selected="true">ダイヤグラム</button>
+  <button data-view="timetable" aria-selected="false">時刻表</button>
+  <button data-view="duty" aria-selected="false">運用</button>
+  <button data-view="check" aria-selected="false">検証</button>
+  <button data-view="disrupt" aria-selected="false">運転整理</button>
+  <button data-view="line" aria-selected="false">線区設定</button>
+  <button data-view="dia" aria-selected="false">ダイヤ設定</button>
+  <button data-view="export" aria-selected="false">出力</button>
+</nav>
+
+<main>
+  <!-- ダイヤグラム -->
+  <section class="view active" id="v-diagram">
+    <div class="panel">
+      <div class="row">
+        <label class="f">時間軸 <input type="range" id="zoom-x" min="1" max="14" step="0.5" value="4"><span class="hint" id="zoom-x-v">4 px/分</span></label>
+        <label class="f">縦軸 <input type="range" id="zoom-y" min="8" max="60" step="1" value="26"><span class="hint" id="zoom-y-v">26 px/km</span></label>
+        <label class="f">縦軸の取り方
+          <select id="ymode"><option value="km">キロ程按分</option><option value="even">駅等間隔</option></select>
+        </label>
+        <label class="f">表示時間帯
+          <input type="text" class="time" id="range-from" placeholder="05:00">〜
+          <input type="text" class="time" id="range-to" placeholder="25:00">
+          <button class="ghost" id="range-all">全日</button>
+        </label>
+        <span id="type-filter" class="row tight"></span>
+      </div>
+    </div>
+    <div class="diagram" id="dg"></div>
+    <div class="legend" id="legend"></div>
+    <div class="panel" id="dg-detail" style="margin-top:12px"><span class="hint">スジをクリックすると列車の詳細と、その運用が強調表示されるよ</span></div>
+  </section>
+
+  <!-- 時刻表 -->
+  <section class="view" id="v-timetable">
+    <div class="panel">
+      <div class="row">
+        <label class="f">方向 <select id="tt-dir"><option value="down">下り</option><option value="up">上り</option></select></label>
+        <label class="f">時間帯 <select id="tt-hour"></select></label>
+        <label class="f"><input type="checkbox" id="tt-arr"> 着時刻も表示</label>
+        <span class="hint">セルをクリックするとその列車のスタフ（行路表）を表示するよ</span>
+      </div>
+    </div>
+    <div id="tt-grid"></div>
+    <div class="panel" style="margin-top:12px">
+      <h2>駅の発車時刻表</h2>
+      <div class="row">
+        <label class="f">駅 <select id="board-st"></select></label>
+        <label class="f">方向 <select id="board-dir"><option value="down">下り</option><option value="up">上り</option></select></label>
+      </div>
+      <pre class="out" id="board-out"></pre>
+    </div>
+    <div class="panel" id="tt-sheet"></div>
+  </section>
+
+  <!-- 運用 -->
+  <section class="view" id="v-duty">
+    <div class="panel">
+      <h2>運用（編成運用）</h2>
+      <div class="row" id="duty-sum"></div>
+    </div>
+    <div id="duty-gantt"></div>
+    <div class="panel" style="margin-top:12px"><h2>運用一覧</h2><div id="duty-table"></div></div>
+  </section>
+
+  <!-- 検証 -->
+  <section class="view" id="v-check">
+    <div class="panel">
+      <h2>ダイヤ検証</h2>
+      <div class="row" id="check-filter"></div>
+      <div id="check-list" style="margin-top:8px"></div>
+    </div>
+  </section>
+
+  <!-- 運転整理（遅延波及シミュレーション） -->
+  <section class="view" id="v-disrupt">
+    <div class="panel">
+      <h2>遅延波及シミュレーション</h2>
+      <div class="row">
+        <label class="f">対象列車 <select id="ds-train"></select></label>
+        <label class="f">遅延 <input type="number" id="ds-delay" value="5" min="1" max="60" step="1"> 分</label>
+        <button class="primary" id="ds-run">波及を計算</button>
+        <button id="ds-clear">解除</button>
+        <span class="hint">計画ダイヤの列車順序を保ったまま、最小運転時隔と最小折返し時分の制約で後続・折返しに波及させるよ（回復運転は見込まない）</span>
+      </div>
+      <div class="row" id="ds-sum" style="margin-top:8px"></div>
+    </div>
+    <div class="panel"><h2>遅延した列車</h2><div id="ds-list"></div></div>
+  </section>
+
+  <!-- 線区設定 -->
+  <section class="view" id="v-line">
+    <div class="panel"><h2>線区諸元</h2><div id="ed-line"></div></div>
+  </section>
+
+  <!-- ダイヤ設定 -->
+  <section class="view" id="v-dia">
+    <div class="panel"><h2>列車種別と停車駅</h2><div id="ed-type"></div></div>
+    <div class="panel"><h2>時間帯パターン</h2><div id="ed-pattern"></div></div>
+    <div class="panel"><h2>計算パラメータ</h2><div id="ed-param"></div></div>
+  </section>
+
+  <!-- 出力 -->
+  <section class="view" id="v-export">
+    <div class="panel">
+      <h2>ファイル出力</h2>
+      <div class="row">
+        <button data-ex="json">ダイヤファイル(JSON)</button>
+        <button data-ex="grid-down">時刻表CSV（下り）</button>
+        <button data-ex="grid-up">時刻表CSV（上り）</button>
+        <button data-ex="trains">列車一覧CSV</button>
+        <button data-ex="duties">運用CSV</button>
+        <button data-ex="svg">ダイヤグラムSVG</button>
+      </div>
+      <div class="hint" style="margin-top:6px">CSV は Excel で開けるよう UTF-8 BOM 付きで出力するよ。</div>
+    </div>
+    <div class="panel"><h2>列車一覧</h2><div id="ex-list"></div></div>
+  </section>
+</main>
+
+<script src="js/core/time.js"></script>
+<script src="js/core/line.js"></script>
+<script src="js/core/schedule.js"></script>
+<script src="js/core/operation.js"></script>
+<script src="js/core/validate.js"></script>
+<script src="js/core/disrupt.js"></script>
+<script src="js/core/exporters.js"></script>
+<script src="js/ui/diagram.js"></script>
+<script src="js/ui/views.js"></script>
+<script src="js/ui/editors.js"></script>
+<script src="js/ui/app.js"></script>
+</body>
+</html>

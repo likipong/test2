@@ -1,0 +1,266 @@
+/* ダイヤグラム（列車ダイヤ）の描画
+ *
+ * 横軸＝時刻、縦軸＝駅（キロ程按分／等間隔を切替）。
+ * 「駅名（左固定）／時刻目盛（上固定）／作図面（両方向スクロール）」の 3 面をスクロール同期させる。
+ */
+(function (root) {
+  'use strict';
+
+  var T = root.DiaTime, Sch = root.DiaSchedule;
+  var NS = 'http://www.w3.org/2000/svg';
+  var PAD_TOP = 14, PAD_BOTTOM = 14, PAD_LEFT = 8;
+
+  function el(name, attrs, text) {
+    var e = document.createElementNS(NS, name);
+    for (var k in attrs) if (attrs[k] != null) e.setAttribute(k, attrs[k]);
+    if (text != null) e.textContent = text;
+    return e;
+  }
+
+  function Diagram(host) {
+    this.host = host;
+    host.innerHTML =
+      '<div class="dg-corner">時刻＼駅</div>' +
+      '<div class="dg-time"></div>' +
+      '<div class="dg-st"></div>' +
+      '<div class="dg-plot"></div>' +
+      '<div class="tip"></div>';
+    this.elTime = host.querySelector('.dg-time');
+    this.elSt = host.querySelector('.dg-st');
+    this.elPlot = host.querySelector('.dg-plot');
+    this.tip = host.querySelector('.tip');
+    this.selected = null;
+    this.onSelect = null;
+
+    var self = this;
+    this.elPlot.addEventListener('scroll', function () {
+      self.elTime.scrollLeft = self.elPlot.scrollLeft;
+      self.elSt.scrollTop = self.elPlot.scrollTop;
+    });
+  }
+
+  Diagram.prototype.render = function (state, view) {
+    var line = state.line, trains = state.trains, types = state.types;
+    this.state = state; this.view = view;
+
+    var typeMap = {}; types.forEach(function (t) { typeMap[t.id] = t; });
+    var shown = trains.filter(function (t) {
+      return !view.hidden || !view.hidden[t.typeId];
+    });
+
+    var t0 = view.t0, t1 = view.t1;
+    if (t0 == null || t1 == null) {
+      var all = trains.length ? trains : [{ depTime: 18000, arrTime: 86400 }];
+      t0 = Math.min.apply(null, all.map(function (t) { return t.depTime; })) - 600;
+      t1 = Math.max.apply(null, all.map(function (t) { return t.arrTime; })) + 600;
+      t0 = Math.floor(t0 / 1800) * 1800; t1 = Math.ceil(t1 / 1800) * 1800;
+    }
+    this.t0 = t0; this.t1 = t1;
+
+    var W = Math.max(600, Math.round((t1 - t0) / 60 * view.pxPerMin)) + PAD_LEFT * 2;
+    var ys = layoutY(line, view);
+    var H = ys.height;
+
+    this.x = function (t) { return PAD_LEFT + (t - t0) / 60 * view.pxPerMin; };
+    this.y = function (idx) { return ys.y[idx]; };
+
+    // --- 作図面 ---
+    var svg = el('svg', { width: W, height: H, viewBox: '0 0 ' + W + ' ' + H });
+
+    // 単線区間の帯
+    line.sections.forEach(function (sec, i) {
+      if (!sec.single) return;
+      var y1 = ys.y[i], y2 = ys.y[i + 1];
+      svg.appendChild(el('rect', { x: 0, y: Math.min(y1, y2), width: W, height: Math.abs(y2 - y1), class: 'single-band' }));
+    });
+
+    // 時刻グリッド
+    var gridStep = view.pxPerMin >= 6 ? 120 : view.pxPerMin >= 3 ? 300 : 600;
+    for (var t = Math.ceil(t0 / gridStep) * gridStep; t <= t1; t += gridStep) {
+      var cls = t % 3600 === 0 ? 'tick hour' : (t % 600 === 0 ? 'tick ten' : 'tick');
+      if (t % 600 !== 0 && view.pxPerMin < 6) continue;
+      svg.appendChild(el('line', { x1: this.x(t), y1: PAD_TOP - 6, x2: this.x(t), y2: H - PAD_BOTTOM + 6, class: cls }));
+    }
+
+    // 駅線
+    line.stations.forEach(function (st, i) {
+      svg.appendChild(el('line', {
+        x1: 0, y1: ys.y[i], x2: W, y2: ys.y[i],
+        class: 'st-line' + (st.canTurn || st.canOvertake ? ' major' : '')
+      }));
+    });
+
+    // 列車スジ
+    var g = el('g', {});
+    var self = this;
+    shown.forEach(function (tr) {
+      var pts = points(tr, self.x, ys.y);
+      if (pts.length < 2) return;
+      var d = pts.map(function (p) { return p[0].toFixed(1) + ',' + p[1].toFixed(1); }).join(' ');
+      var color = (typeMap[tr.typeId] || {}).color || '#888';
+      var hit = el('polyline', { points: d, class: 'train-hit' });
+      hit.dataset.no = tr.no;
+      g.appendChild(hit);
+      var pl = el('polyline', {
+        points: d, class: 'train-line ' + tr.dir, stroke: color,
+        'stroke-dasharray': tr.dir === 'up' ? null : null
+      });
+      pl.dataset.no = tr.no;
+      g.appendChild(pl);
+
+      // 待避（抑止）を点で示す
+      (tr.holds || []).forEach(function (h) {
+        var s = Sch.stopAt(tr, h.idx);
+        if (!s) return;
+        g.appendChild(el('circle', { cx: self.x((s.arr + s.dep) / 2), cy: ys.y[h.idx], r: 2.2, class: 'hold-dot' }));
+      });
+    });
+    svg.appendChild(g);
+
+    // 遅延ダイヤの重ね描き（運転整理シミュレーション）
+    if (view.overlay && view.overlay.trains && view.overlay.trains.length) {
+      g.setAttribute('opacity', '0.28');
+      var og = el('g', {});
+      var delayed = {};
+      (view.overlay.delays || []).forEach(function (d) { delayed[d.no] = d.delay; });
+      view.overlay.trains.forEach(function (tr) {
+        if (!delayed[tr.no]) return;
+        var pts2 = points(tr, self.x, ys.y);
+        if (pts2.length < 2) return;
+        og.appendChild(el('polyline', {
+          points: pts2.map(function (p) { return p[0].toFixed(1) + ',' + p[1].toFixed(1); }).join(' '),
+          class: 'train-line', stroke: (typeMap[tr.typeId] || {}).color || '#888',
+          'stroke-dasharray': '5 3', 'stroke-width': 1.8
+        }));
+      });
+      svg.appendChild(og);
+    }
+
+    // 列車番号（拡大時のみ）
+    if (view.pxPerMin >= 5) {
+      var lab = el('g', {});
+      shown.forEach(function (tr) {
+        var s0 = tr.stops[0];
+        var yy = ys.y[tr.fromIdx];
+        var xx = self.x(s0.dep);
+        var up = tr.dir === 'up';
+        lab.appendChild(el('text', {
+          x: xx + 3, y: yy + (up ? -4 : 11), class: 'axis-text',
+          fill: (typeMap[tr.typeId] || {}).color
+        }, tr.no));
+      });
+      svg.appendChild(lab);
+    }
+
+    this.elPlot.innerHTML = '';
+    this.elPlot.appendChild(svg);
+    this.svg = svg;
+
+    // --- 時刻目盛（上） ---
+    var tsvg = el('svg', { width: W, height: 30 });
+    for (var h = Math.ceil(t0 / 1800) * 1800; h <= t1; h += 1800) {
+      var isHour = h % 3600 === 0;
+      tsvg.appendChild(el('line', { x1: this.x(h), y1: isHour ? 12 : 20, x2: this.x(h), y2: 30, class: 'tick' + (isHour ? ' hour' : '') }));
+      if (isHour || view.pxPerMin >= 8) {
+        tsvg.appendChild(el('text', { x: this.x(h) + 3, y: 11, class: 'axis-text' }, T.fmtTime(h)));
+      }
+    }
+    this.elTime.innerHTML = ''; this.elTime.appendChild(tsvg);
+
+    // --- 駅名（左） ---
+    var ssvg = el('svg', { width: 112, height: H });
+    line.stations.forEach(function (st, i) {
+      ssvg.appendChild(el('line', { x1: 100, y1: ys.y[i], x2: 112, y2: ys.y[i], class: 'st-line major' }));
+      var name = st.name.length > 7 ? st.name.slice(0, 6) + '…' : st.name;
+      ssvg.appendChild(el('text', {
+        x: 96, y: ys.y[i] + 3.5, 'text-anchor': 'end',
+        class: 'st-name' + (st.canTurn ? ' turn' : '')
+      }, name));
+      if (st.canOvertake) ssvg.appendChild(el('circle', { cx: 104, cy: ys.y[i], r: 2.4, fill: 'var(--warn)' }));
+    });
+    this.elSt.innerHTML = ''; this.elSt.appendChild(ssvg);
+
+    this.bindPointer(typeMap);
+    if (this.selected) this.setSelection(this.selected);
+  };
+
+  /** 縦軸レイアウト（キロ程按分 or 等間隔） */
+  function layoutY(line, view) {
+    var n = line.stations.length;
+    var y = [];
+    if (view.yMode === 'even') {
+      var gap = view.pxPerKm * 1.0;
+      for (var i = 0; i < n; i++) y.push(PAD_TOP + i * gap);
+    } else {
+      var km0 = line.stations[0].km;
+      for (var j = 0; j < n; j++) y.push(PAD_TOP + (line.stations[j].km - km0) * view.pxPerKm);
+    }
+    return { y: y, height: Math.round(y[n - 1] + PAD_BOTTOM) };
+  }
+
+  function points(tr, x, y) {
+    var pts = [];
+    tr.stops.forEach(function (s) {
+      if (s.arr != null) pts.push([x(s.arr), y[s.idx]]);
+      if (s.dep != null && s.dep !== s.arr) pts.push([x(s.dep), y[s.idx]]);
+      if (s.arr == null && s.dep != null) { /* 始発 */ }
+    });
+    return pts;
+  }
+
+  Diagram.prototype.bindPointer = function (typeMap) {
+    var self = this;
+    var trainByNo = {};
+    this.state.trains.forEach(function (t) { trainByNo[t.no] = t; });
+
+    this.svg.addEventListener('mousemove', function (ev) {
+      var el2 = ev.target;
+      if (!el2.dataset || !el2.dataset.no) { self.tip.style.display = 'none'; return; }
+      var tr = trainByNo[el2.dataset.no];
+      if (!tr) return;
+      var line = self.state.line;
+      var ty = typeMap[tr.typeId] || {};
+      self.tip.textContent =
+        tr.no + '列車  ' + (ty.short || ty.name || '') + '  ' + (tr.dir === 'down' ? '下り' : '上り') + '\n' +
+        line.stations[tr.fromIdx].name + ' ' + T.fmtTime(tr.depTime) + ' → ' +
+        line.stations[tr.toIdx].name + ' ' + T.fmtTime(tr.arrTime) + '\n' +
+        '所要 ' + T.fmtDuration(tr.arrTime - tr.depTime) +
+        ((tr.holds || []).length ? '\n待避: ' + tr.holds.map(function (h) {
+          return line.stations[h.idx].name + ' ' + T.fmtDuration(h.extra);
+        }).join(', ') : '');
+      var r = self.host.getBoundingClientRect();
+      self.tip.style.display = 'block';
+      var tx = ev.clientX - r.left + 12, ty2 = ev.clientY - r.top + 12;
+      self.tip.style.left = Math.min(tx, r.width - self.tip.offsetWidth - 8) + 'px';
+      self.tip.style.top = Math.min(ty2, r.height - self.tip.offsetHeight - 8) + 'px';
+    });
+    this.svg.addEventListener('mouseleave', function () { self.tip.style.display = 'none'; });
+    this.svg.addEventListener('click', function (ev) {
+      var no = ev.target.dataset && ev.target.dataset.no;
+      if (!no) return;
+      if (self.onSelect) self.onSelect(trainByNo[no]);
+    });
+  };
+
+  /** 指定した列車番号群を強調表示 */
+  Diagram.prototype.setSelection = function (nos) {
+    this.selected = nos;
+    if (!this.svg) return;
+    var set = {};
+    (nos || []).forEach(function (n) { set[n] = true; });
+    var lines = this.svg.querySelectorAll('.train-line');
+    for (var i = 0; i < lines.length; i++) {
+      lines[i].classList.toggle('sel', !!set[lines[i].dataset.no]);
+      lines[i].style.opacity = (!nos || !nos.length || set[lines[i].dataset.no]) ? '' : '0.28';
+    }
+  };
+
+  /** 指定時刻が画面中央に来るようスクロール */
+  Diagram.prototype.scrollToTime = function (sec) {
+    if (!this.x) return;
+    var target = this.x(sec) - this.elPlot.clientWidth / 2;
+    this.elPlot.scrollLeft = Math.max(0, target);
+  };
+
+  root.DiaDiagram = { create: function (host) { return new Diagram(host); } };
+})(window);

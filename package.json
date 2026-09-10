@@ -1,0 +1,12 @@
+{
+  "name": "dia-editor",
+  "version": "1.0.0",
+  "description": "地方都市地下鉄を想定した運転ダイヤ作成アプリ",
+  "private": true,
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "start": "npx --yes http-server -p 8080 -c-1 .",
+    "build": "node tools/build-single.js"
+  },
+  "license": "MIT"
+}
