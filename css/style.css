@@ -205,7 +205,7 @@ pre.out{background:var(--panel2);border:1px solid var(--line);border-radius:8px;
 .boot-sub{font-family:var(--mono);font-size:10px;letter-spacing:.34em;color:var(--ink-mute)}
 .boot-bar{width:260px;height:2px;background:#222a35;border-radius:2px;overflow:hidden;margin-top:6px}
 .boot-bar i{display:block;height:100%;width:0;background:linear-gradient(90deg,transparent,var(--accent));
-  box-shadow:0 0 12px var(--accent);animation:bootBar 1.25s cubic-bezier(.4,0,.2,1) forwards}
+  box-shadow:0 0 12px var(--accent);animation:bootBar 2.25s cubic-bezier(.4,0,.2,1) forwards}
 .boot-log{font-family:var(--mono);font-size:10.5px;color:var(--ink-mute);letter-spacing:.06em;min-height:1.3em}
 @keyframes bootIn{from{opacity:0;transform:translateY(8px) scale(.98)}to{opacity:1;transform:none}}
 @keyframes bootBar{to{width:100%}}

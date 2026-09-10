@@ -89,6 +89,7 @@
     });
     document.getElementById('ttl-line').textContent = state.line.name;
     document.getElementById('ttl-company').textContent = state.line.company;
+    document.title = (state.line.name ? state.line.name + ' ' : '') + '運行管理システム';
   }
 
   /* ---------- 各ビュー ---------- */
@@ -887,9 +888,9 @@
       i++;
       if (log && msgs[i]) log.textContent = msgs[i];
       if (i >= msgs.length - 1) clearInterval(iv);
-    }, 280);
+    }, 480);
     var close = function () { clearInterval(iv); box.classList.add('done'); };
-    setTimeout(close, 1650);
+    setTimeout(close, 2650);
     box.addEventListener('click', close);
   })();
 
