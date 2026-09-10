@@ -197,8 +197,11 @@ pre.out{background:var(--panel2);border:1px solid var(--line);border-radius:8px;
 .boot-inner{text-align:center;display:grid;gap:10px;justify-items:center;
   animation:bootIn .5s cubic-bezier(.2,.8,.2,1) both}
 .boot-mark{font-size:40px;color:var(--accent);text-shadow:0 0 24px var(--accent);animation:pulse 1.6s ease-in-out infinite}
-.boot-title{font-family:var(--display);font-size:26px;font-weight:700;letter-spacing:.22em;color:#eaf2ff;
-  text-shadow:0 0 22px rgba(77,163,255,.45)}
+.boot-title{font-family:var(--display);font-size:clamp(17px,3.2vw,28px);font-weight:700;
+  letter-spacing:.16em;color:#eaf2ff;text-shadow:0 0 22px rgba(77,163,255,.45);
+  max-width:min(92vw,820px);text-wrap:balance;line-height:1.35}
+.boot-title .co{font-size:.66em;letter-spacing:.22em;color:#b9cde6;display:block;margin-bottom:2px;
+  text-shadow:0 0 14px rgba(77,163,255,.3)}
 .boot-sub{font-family:var(--mono);font-size:10px;letter-spacing:.34em;color:var(--ink-mute)}
 .boot-bar{width:260px;height:2px;background:#222a35;border-radius:2px;overflow:hidden;margin-top:6px}
 .boot-bar i{display:block;height:100%;width:0;background:linear-gradient(90deg,transparent,var(--accent));

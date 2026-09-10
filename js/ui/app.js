@@ -872,6 +872,14 @@
   (function boot() {
     var box = document.getElementById('boot');
     if (!box) return;
+    // 起動画面の名前は線区設定から組み立てる（事業者名・線名・システム名）
+    var ttl = document.getElementById('boot-title');
+    if (ttl) {
+      ttl.innerHTML = '';
+      if (state.line.company) ttl.appendChild(h('span', { class: 'co', text: state.line.company }));
+      ttl.appendChild(document.createTextNode(
+        (state.line.name ? state.line.name + '　' : '') + '運行管理システム'));
+    }
     var log = document.getElementById('boot-log');
     var msgs = ['線区諸元を読み込み中…', 'パターンダイヤを生成中…', '待避・折返しを検査中…', '車両運用・仕業を組成中…', 'SYSTEM ONLINE'];
     var i = 0;
