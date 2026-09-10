@@ -13,16 +13,21 @@
   'use strict';
 
   var Sch = root.DiaSchedule || (typeof require !== 'undefined' ? require('./schedule.js') : null);
+  var Crew = root.DiaCrew || (typeof require !== 'undefined' ? require('./crew.js') : null);
   var T = root.DiaTime || (typeof require !== 'undefined' ? require('./time.js') : null);
 
   var PAIR_WINDOW = 3600; // 追い抜き判定で比較する列車間の発時刻差の上限（秒）
 
-  function validate(line, trains, duties, params) {
+  function validate(line, trains, duties, params, crewDuties) {
     var issues = [];
     checkHeadway(line, trains, params, issues);
     checkOvertake(line, trains, issues);
     checkSingleTrack(line, trains, issues);
     checkTurnBack(line, trains, duties, params, issues);
+    if (crewDuties && crewDuties.length) {
+      var cp = Object.assign(Crew.defaultCrewParams(), params.crew || {});
+      Crew.checkCrew(line, crewDuties, cp).forEach(function (i) { issues.push(i); });
+    }
     issues.sort(function (a, b) {
       var rank = { error: 0, warn: 1, info: 2 };
       return rank[a.level] - rank[b.level] || (a.time || 0) - (b.time || 0);

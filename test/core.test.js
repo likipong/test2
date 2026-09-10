@@ -8,6 +8,7 @@ const Sch = require('../js/core/schedule.js');
 const Op = require('../js/core/operation.js');
 const Val = require('../js/core/validate.js');
 const Dis = require('../js/core/disrupt.js');
+const Crew = require('../js/core/crew.js');
 const Ex = require('../js/core/exporters.js');
 
 function baseState(over) {
@@ -168,6 +169,103 @@ test('遅延は後続と折返しへ波及し、やがて収まる', () => {
   const untouched = res.trains.find(t => !res.delays.some(d => d.no === t.no));
   const orig = trains.find(t => t.no === untouched.no);
   assert.deepEqual(untouched.stops, orig.stops);
+});
+
+function withCrew(st) {
+  const { trains } = Sch.buildTimetable(st);
+  const { duties } = Op.assignDuties(st.line, trains, st.params);
+  const crew = Crew.buildCrewDuties(st.line, trains, duties, st.params);
+  return { trains, sets: duties, crew: crew.duties, cp: crew.params };
+}
+
+test('仕業は全列車を過不足なく受け持つ', () => {
+  const st = baseState();
+  const { trains, crew } = withCrew(st);
+  const covered = crew.reduce((a, d) => a + d.trains.length, 0);
+  assert.equal(covered, trains.length, '全列車に乗務員がつくこと');
+  assert.equal(new Set(crew.flatMap(d => d.trains.map(t => t.no))).size, trains.length, '二重乗務がないこと');
+  assert.ok(crew.length >= 20 && crew.length <= 60, `仕業数が現実的な範囲（${crew.length}）`);
+});
+
+test('仕業は拘束・乗務・連続乗務の上限を守る', () => {
+  const st = baseState();
+  const { crew, cp } = withCrew(st);
+  for (const d of crew) {
+    assert.ok(d.spreadSec <= cp.maxSpread, `仕業${d.no}の拘束 ${d.spreadSec} が上限超え`);
+    assert.ok(d.driveSec <= cp.maxDrive, `仕業${d.no}の実乗務 ${d.driveSec} が上限超え`);
+    assert.equal(d.signOff - d.signOn, d.spreadSec);
+
+    let cont = 0, worst = 0;
+    for (const l of d.legs) {
+      if (l.kind === 'train') { cont += l.arr - l.dep; worst = Math.max(worst, cont); }
+      else if (l.kind === 'break') cont = 0;
+    }
+    assert.ok(worst <= cp.maxContinuous, `仕業${d.no}の連続乗務 ${worst} が上限超え`);
+  }
+  assert.equal(Crew.checkCrew(st.line, crew, cp).filter(i => i.level === 'error').length, 0);
+});
+
+test('仕業は乗務員基地で始まり乗務員基地で終わる', () => {
+  const st = baseState();
+  const { crew } = withCrew(st);
+  for (const d of crew) {
+    assert.ok(st.line.stations[d.startIdx].crewBase, `仕業${d.no}の出勤駅が基地でない`);
+    assert.ok(st.line.stations[d.endIdx].crewBase, `仕業${d.no}の退勤駅が基地でない`);
+    assert.equal(d.warns.length, 0, `仕業${d.no}に警告が出ている: ${d.warns}`);
+  }
+});
+
+test('行路は時系列に並び、乗務の間に交代時分がある', () => {
+  const st = baseState();
+  const { crew, sets, cp } = withCrew(st);
+  const nextInSet = {};
+  for (const s of sets) for (let i = 0; i < s.trains.length - 1; i++) nextInSet[s.trains[i].no] = s.trains[i + 1].no;
+
+  for (const d of crew) {
+    let prev = d.signOn;
+    for (const l of d.legs) {
+      const from = l.kind === 'train' ? l.dep : (l.time != null ? l.time : l.from);
+      assert.ok(from >= prev, `仕業${d.no}の行路が逆行している`);
+      prev = l.kind === 'train' ? l.arr : (l.time != null ? l.time : l.to);
+    }
+    for (let i = 0; i < d.trains.length - 1; i++) {
+      const a = d.trains[i], b = d.trains[i + 1];
+      assert.equal(a.toIdx, b.fromIdx, '乗り継ぐ駅が一致すること');
+      const gap = b.depTime - a.arrTime;
+      if (nextInSet[a.no] !== b.no) {
+        assert.ok(gap >= cp.minRelief, `仕業${d.no}の交代時分 ${gap} が不足`);
+      }
+      assert.ok(gap >= 0);
+    }
+  }
+});
+
+test('拘束時間の上限を締めると仕業数が増える', () => {
+  const loose = baseState();
+  const tight = baseState();
+  tight.params.crew = Object.assign({}, tight.params.crew, { maxSpread: 6 * 3600 });
+  assert.ok(withCrew(tight).crew.length > withCrew(loose).crew.length,
+    '条件を厳しくすれば必要な仕業は増えるはず');
+});
+
+test('乗務員基地のない駅で終わる仕業には警告が出る', () => {
+  const st = baseState();
+  st.line.stations.forEach(s => { s.crewBase = false; });
+  st.line.stations[8].crewBase = true;   // 途中駅だけを基地にする
+  const { crew } = withCrew(st);
+  assert.ok(crew.some(d => d.warns.length > 0), '基地外で始終端になる仕業を警告すること');
+});
+
+test('仕業 CSV と行路表が生成できる', () => {
+  const st = baseState();
+  const { crew } = withCrew(st);
+  const csv = Ex.crewCSV(st.line, crew);
+  assert.equal(csv.split('\r\n').length, crew.length + 1);
+  assert.ok(csv.startsWith('仕業,区分,出勤,'));
+  const sheet = Ex.crewSheetText(st.line, crew[0], st.types);
+  assert.ok(sheet.includes('出勤'));
+  assert.ok(sheet.includes('退勤'));
+  assert.ok(/列車/.test(sheet));
 });
 
 test('保存した JSON を読み戻すと同じダイヤになる', () => {

@@ -29,6 +29,16 @@
     return (neg ? '-' : '') + out;
   }
 
+  /** 拘束時間など長い時分の表記。1 時間以上なら "8時間18分"、未満なら "45分" */
+  function fmtHM(sec) {
+    var t = Math.round(sec || 0);
+    var sign = t < 0 ? '-' : '';
+    t = Math.abs(t);
+    var h = Math.floor(t / 3600), m = Math.round((t % 3600) / 60);
+    if (m === 60) { h++; m = 0; }
+    return sign + (h ? h + '時間' + (m ? m + '分' : '') : m + '分');
+  }
+
   /** 秒 → 時刻表用の「分」表記。秒が 0 でなければ小さく秒を添えるための分解 */
   function splitTime(sec) {
     var t = Math.round(sec);
@@ -59,6 +69,7 @@
     fmtTime: fmtTime,
     splitTime: splitTime,
     fmtDuration: fmtDuration,
+    fmtHM: fmtHM,
     parseMinutes: parseMinutes
   };
 

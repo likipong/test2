@@ -94,7 +94,7 @@
   }
 
   /* ---------- 1 列車のスタフ（行路表） ---------- */
-  function trainSheet(state, train, duty) {
+  function trainSheet(state, train, duty, crew) {
     var line = state.line, ty = typeOf(state.types, train.typeId);
     var rows = train.stops.map(function (s) {
       var st = line.stations[s.idx];
@@ -190,6 +190,140 @@
     ]);
   }
 
+  /* ---------- 仕業（乗務員行路） ---------- */
+  function crewGantt(state, duties, onPick) {
+    var line = state.line, types = state.types;
+    if (!duties.length) return h('div', { class: 'hint', text: 'ダイヤを作成すると仕業が組まれるよ' });
+    var t0 = Math.min.apply(null, duties.map(function (d) { return d.signOn; })) - 600;
+    var t1 = Math.max.apply(null, duties.map(function (d) { return d.signOff; })) + 600;
+    var pxMin = 2.2, rowH = 20, left = 54, top = 22;
+    var W = left + (t1 - t0) / 60 * pxMin + 20;
+    var H = top + duties.length * rowH + 10;
+    var svg = svgEl('svg', { width: W, height: H });
+    var x = function (t) { return left + (t - t0) / 60 * pxMin; };
+
+    for (var t = Math.ceil(t0 / 3600) * 3600; t <= t1; t += 3600) {
+      svg.appendChild(svgEl('line', { x1: x(t), y1: top - 6, x2: x(t), y2: H - 6, class: 'tick hour' }));
+      svg.appendChild(svgEl('text', { x: x(t) + 2, y: 12, class: 'axis-text' }, T.fmtTime(t).slice(0, 2)));
+    }
+
+    duties.forEach(function (d, i) {
+      var y = top + i * rowH;
+      var g = svgEl('g', { class: 'duty-bar' });
+      g.dataset.no = d.no;
+      g.appendChild(svgEl('text', { x: 4, y: y + 12, class: 'axis-text' }, String(d.no)));
+      // 拘束時間の下敷き
+      g.appendChild(svgEl('rect', {
+        x: x(d.signOn), y: y + 5, width: Math.max(2, x(d.signOff) - x(d.signOn)), height: rowH - 12,
+        rx: 2, fill: 'var(--line)', opacity: 0.8
+      }));
+      d.legs.forEach(function (l) {
+        if (l.kind === 'train') {
+          var ty = typeOf(types, l.typeId);
+          g.appendChild(svgEl('rect', {
+            x: x(l.dep), y: y + 3, width: Math.max(2, x(l.arr) - x(l.dep)), height: rowH - 8,
+            rx: 2, fill: ty.color, opacity: l.dir === 'down' ? 0.95 : 0.6
+          }));
+        } else if (l.kind === 'break') {
+          g.appendChild(svgEl('rect', {
+            x: x(l.from), y: y + 6, width: Math.max(2, x(l.to) - x(l.from)), height: rowH - 14,
+            rx: 2, fill: 'var(--warn)', opacity: 0.55
+          }));
+        }
+      });
+      g.appendChild(svgEl('title', {}, '仕業' + d.no + '（' + d.kind + '）' +
+        T.fmtTime(d.signOn) + ' ' + line.stations[d.startIdx].name + ' 出勤 → ' +
+        T.fmtTime(d.signOff) + ' ' + line.stations[d.endIdx].name + ' 退勤 / 拘束 ' +
+        T.fmtHM(d.spreadSec) + '・実乗務 ' + T.fmtHM(d.driveSec)));
+      svg.appendChild(g);
+    });
+    svg.addEventListener('click', function (ev) {
+      var g = ev.target.closest && ev.target.closest('.duty-bar');
+      if (g && onPick) onPick(parseInt(g.dataset.no, 10));
+    });
+    return h('div', { class: 'gantt', style: 'max-height:52vh' }, [svg]);
+  }
+
+  function crewTable(state, duties, onPick) {
+    var line = state.line;
+    return h('div', { class: 'tbl-wrap', style: 'max-height:52vh' }, [
+      h('table', {}, [
+        h('thead', {}, [h('tr', {}, ['仕業', '区分', '出勤', '退勤', '拘束', '実乗務', '休憩', '待機', '列車', '乗務効率', ''].map(function (t) {
+          return h('th', { text: t });
+        }))]),
+        h('tbody', {}, duties.map(function (d) {
+          var eff = d.spreadSec ? Math.round(d.driveSec / d.spreadSec * 100) : 0;
+          return h('tr', { onclick: function () { onPick(d.no); } }, [
+            h('td', { class: 'num', style: 'font-weight:700', text: String(d.no) }),
+            h('td', { text: d.kind }),
+            h('td', { class: 'num', text: T.fmtTime(d.signOn) + ' ' + line.stations[d.startIdx].name }),
+            h('td', { class: 'num', text: T.fmtTime(d.signOff) + ' ' + line.stations[d.endIdx].name }),
+            h('td', { class: 'num', text: T.fmtHM(d.spreadSec) }),
+            h('td', { class: 'num', text: T.fmtHM(d.driveSec) }),
+            h('td', { class: 'num', style: d.breakSec ? 'color:var(--warn)' : 'color:var(--ink-mute)',
+              text: d.breakSec ? T.fmtHM(d.breakSec) : 'なし' }),
+            h('td', { class: 'num', text: T.fmtHM(d.waitSec) }),
+            h('td', { class: 'num', text: String(d.trains.length) }),
+            h('td', { class: 'num', text: eff + '%' }),
+            h('td', { text: d.warns.length ? '⚠' : '', style: 'color:var(--warn)', title: d.warns.join(' / ') })
+          ]);
+        }))
+      ])
+    ]);
+  }
+
+  /** 1 仕業の行路表 */
+  function crewSheet(state, duty) {
+    var line = state.line;
+    var rows = duty.legs.map(function (l) {
+      if (l.kind === 'signon' || l.kind === 'signoff') {
+        return h('tr', { style: 'background:color-mix(in srgb,var(--accent) 8%,transparent)' }, [
+          h('td', { style: 'font-weight:700', text: l.kind === 'signon' ? '出勤・点呼' : '退勤' }),
+          h('td', { text: line.stations[l.atIdx].name }),
+          h('td', { class: 'num', text: T.fmtTime(l.time) }),
+          h('td', { class: 'num', text: '' }), h('td', { text: '' })
+        ]);
+      }
+      if (l.kind === 'train') {
+        var ty = typeOf(state.types, l.typeId);
+        return h('tr', {}, [
+          h('td', {}, [h('span', { class: 'pill', style: 'background:' + ty.color, text: ty.short || ty.name }),
+            document.createTextNode(' ' + l.no + '列車')]),
+          h('td', { text: line.stations[l.fromIdx].name + ' → ' + line.stations[l.toIdx].name }),
+          h('td', { class: 'num', text: T.fmtTime(l.dep) }),
+          h('td', { class: 'num', text: T.fmtTime(l.arr) }),
+          h('td', { class: 'num', text: T.fmtDuration(l.arr - l.dep) })
+        ]);
+      }
+      return h('tr', { style: l.kind === 'break' ? 'color:var(--warn)' : 'color:var(--ink-mute)' }, [
+        h('td', { text: l.kind === 'break' ? '休憩' : '待機' }),
+        h('td', { text: line.stations[l.atIdx].name }),
+        h('td', { class: 'num', text: T.fmtTime(l.from) }),
+        h('td', { class: 'num', text: T.fmtTime(l.to) }),
+        h('td', { class: 'num', text: T.fmtDuration(l.to - l.from) })
+      ]);
+    });
+    return h('div', {}, [
+      h('div', { class: 'row', style: 'margin-bottom:8px' }, [
+        h('b', { text: '仕業 ' + duty.no }),
+        h('span', { class: 'chip', text: duty.kind }),
+        h('span', { class: 'hint', text:
+          T.fmtTime(duty.signOn) + ' ' + line.stations[duty.startIdx].name + ' 出勤 → ' +
+          T.fmtTime(duty.signOff) + ' ' + line.stations[duty.endIdx].name + ' 退勤　拘束 ' +
+          T.fmtHM(duty.spreadSec) + '　実乗務 ' + T.fmtHM(duty.driveSec) +
+          '　休憩 ' + T.fmtHM(duty.breakSec) + '　待機 ' + T.fmtHM(duty.waitSec) })
+      ].concat(duty.warns.map(function (w) { return h('span', { class: 'notes', text: '⚠ ' + w }); }))),
+      h('div', { class: 'tbl-wrap', style: 'max-height:56vh' }, [
+        h('table', {}, [
+          h('thead', {}, [h('tr', {}, ['行路', '駅', '発／開始', '着／終了', '時分'].map(function (t, i) {
+            return h('th', { class: i >= 2 ? 'num' : '', text: t });
+          }))]),
+          h('tbody', {}, rows)
+        ])
+      ])
+    ]);
+  }
+
   /* ---------- 検証結果 ---------- */
   function issueList(issues, onJump) {
     if (!issues.length) return h('div', { class: 'hint', text: '支障は見つからなかったよ' });
@@ -207,6 +341,7 @@
   root.DiaViews = {
     h: h, svgEl: svgEl, typeOf: typeOf,
     stationGrid: stationGrid, trainSheet: trainSheet,
-    dutyGantt: dutyGantt, dutyTable: dutyTable, issueList: issueList
+    dutyGantt: dutyGantt, dutyTable: dutyTable, issueList: issueList,
+    crewGantt: crewGantt, crewTable: crewTable, crewSheet: crewSheet
   };
 })(window);

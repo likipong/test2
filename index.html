@@ -28,6 +28,7 @@
   <button data-view="diagram" aria-selected="true">ダイヤグラム</button>
   <button data-view="timetable" aria-selected="false">時刻表</button>
   <button data-view="duty" aria-selected="false">運用</button>
+  <button data-view="crew" aria-selected="false">仕業</button>
   <button data-view="check" aria-selected="false">検証</button>
   <button data-view="disrupt" aria-selected="false">運転整理</button>
   <button data-view="line" aria-selected="false">線区設定</button>
@@ -90,6 +91,19 @@
     <div class="panel" style="margin-top:12px"><h2>運用一覧</h2><div id="duty-table"></div></div>
   </section>
 
+  <!-- 仕業（乗務員行路） -->
+  <section class="view" id="v-crew">
+    <div class="panel">
+      <h2>仕業（乗務員行路）</h2>
+      <div class="row" id="crew-sum"></div>
+      <div class="row" style="margin-top:10px" id="crew-params"></div>
+      <div class="hint" style="margin-top:6px">乗務員が交代できるのは「乗務員基地」のある駅だけだよ（線区設定で指定）。列車の途中駅での交代は扱わないので、乗務の単位は 1 列車まるごとになる。</div>
+    </div>
+    <div id="crew-gantt"></div>
+    <div class="panel" style="margin-top:12px"><h2>仕業一覧</h2><div id="crew-table"></div></div>
+    <div class="panel" id="crew-sheet"></div>
+  </section>
+
   <!-- 検証 -->
   <section class="view" id="v-check">
     <div class="panel">
@@ -137,6 +151,8 @@
         <button data-ex="grid-up">時刻表CSV（上り）</button>
         <button data-ex="trains">列車一覧CSV</button>
         <button data-ex="duties">運用CSV</button>
+        <button data-ex="crew">仕業CSV</button>
+        <button data-ex="crew-sheet">選択中の仕業の行路表(txt)</button>
         <button data-ex="svg">ダイヤグラムSVG</button>
       </div>
       <div class="hint" style="margin-top:6px">CSV は Excel で開けるよう UTF-8 BOM 付きで出力するよ。</div>
@@ -149,6 +165,7 @@
 <script src="js/core/line.js"></script>
 <script src="js/core/schedule.js"></script>
 <script src="js/core/operation.js"></script>
+<script src="js/core/crew.js"></script>
 <script src="js/core/validate.js"></script>
 <script src="js/core/disrupt.js"></script>
 <script src="js/core/exporters.js"></script>

@@ -28,6 +28,7 @@
         h('td', { class: 'num' }, [chk(st.canTurn, function (e) { st.canTurn = e.target.checked; changed(); })]),
         h('td', { class: 'num' }, [chk(st.canOvertake, function (e) { st.canOvertake = e.target.checked; changed(); })]),
         h('td', { class: 'num' }, [chk(st.depot, function (e) { st.depot = e.target.checked; changed(); })]),
+        h('td', { class: 'num' }, [chk(st.crewBase, function (e) { st.crewBase = e.target.checked; changed(); })]),
         h('td', {}, sec ? [num(sec.runSec, function (e) { sec.runSec = parseInt(e.target.value, 10) || 60; changed(); }, { step: 5, min: 30, style: 'width:64px' })] : []),
         h('td', { class: 'num' }, sec ? [chk(sec.single, function (e) { sec.single = e.target.checked; changed(); })] : []),
         h('td', { class: 'num', style: 'color:var(--ink-mute)',
@@ -43,7 +44,7 @@
       ]);
     });
 
-    var head = ['#', '駅名', 'キロ程', '停車(秒)', '折返', '待避', '車庫', '次駅まで(秒)', '単線', '区間長', ''];
+    var head = ['#', '駅名', 'キロ程', '停車(秒)', '折返', '待避', '車庫', '乗務員基地', '次駅まで(秒)', '単線', '区間長', ''];
     return h('div', {}, [
       h('div', { class: 'row', style: 'margin-bottom:8px' }, [
         h('label', { class: 'f' }, [document.createTextNode('線名'),
@@ -69,7 +70,8 @@
     var km = b ? Math.round((a.km + b.km) / 2 * 10) / 10 : Math.round((a.km + 1) * 10) / 10;
     line.stations.splice(i + 1, 0, {
       id: 'S' + Date.now().toString(36).slice(-5),
-      name: '新駅', kana: '', km: km, dwell: 20, canTurn: false, canOvertake: false, depot: false
+      name: '新駅', kana: '', km: km, dwell: 20,
+      canTurn: false, canOvertake: false, depot: false, crewBase: false
     });
     line.sections.splice(i + 1, 0, { runSec: 100, single: false });
     Line.normalize(line);
@@ -207,8 +209,34 @@
     ]);
   }
 
+  /* ---------- 乗務員仕業の条件 ---------- */
+  function crewParamEditor(state, changed) {
+    var c = state.params.crew;
+    function f(labelText, key, opts) {
+      return h('label', { class: 'f' }, [
+        document.createTextNode(labelText),
+        h('input', {
+          type: 'number', value: Math.round(c[key] / 60 * 10) / 10, step: opts.step || 5, min: opts.min || 0,
+          style: 'width:66px',
+          oninput: function (e) { c[key] = Math.round((parseFloat(e.target.value) || 0) * 60); changed(); }
+        }),
+        h('span', { class: 'hint', text: '分' })
+      ]);
+    }
+    return h('div', { class: 'row', style: 'gap:14px' }, [
+      f('出勤〜発車（点呼）', 'prep', { step: 5 }),
+      f('到着〜退勤', 'wrap', { step: 5 }),
+      f('交代時分', 'minRelief', { step: 1 }),
+      f('連続乗務の上限', 'maxContinuous', { step: 10 }),
+      f('休憩の最小', 'minBreak', { step: 5 }),
+      f('休憩の最大', 'maxBreak', { step: 10 }),
+      f('拘束時間の上限', 'maxSpread', { step: 15 }),
+      f('実乗務の上限', 'maxDrive', { step: 15 })
+    ]);
+  }
+
   root.DiaEditors = {
     lineEditor: lineEditor, typeEditor: typeEditor,
-    patternEditor: patternEditor, paramEditor: paramEditor
+    patternEditor: patternEditor, paramEditor: paramEditor, crewParamEditor: crewParamEditor
   };
 })(window);

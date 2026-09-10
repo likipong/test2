@@ -79,6 +79,49 @@
     return csv(rows);
   }
 
+  /** 仕業（乗務員行路）CSV */
+  function crewCSV(line, duties) {
+    var rows = [['仕業', '区分', '出勤', '出勤基地', '退勤', '退勤基地', '拘束', '実乗務', '休憩', '乗務列車数', '行路']];
+    duties.forEach(function (d) {
+      rows.push([
+        d.no, d.kind, T.fmtTime(d.signOn), line.stations[d.startIdx].name,
+        T.fmtTime(d.signOff), line.stations[d.endIdx].name,
+        T.fmtHM(d.spreadSec), T.fmtHM(d.driveSec), T.fmtHM(d.breakSec),
+        d.trains.length,
+        d.legs.filter(function (l) { return l.kind === 'train' || l.kind === 'break'; })
+          .map(function (l) {
+            return l.kind === 'train' ? l.no : '休憩' + T.fmtDuration(l.to - l.from);
+          }).join(' → ')
+      ]);
+    });
+    return csv(rows);
+  }
+
+  /** 1 仕業の行路表（点呼で読み上げる体裁のプレーンテキスト） */
+  function crewSheetText(line, duty, types) {
+    var out = [line.name + '　仕業 ' + duty.no + '（' + duty.kind + '）', ''];
+    out.push('出勤 ' + T.fmtTime(duty.signOn) + '　' + line.stations[duty.startIdx].name);
+    duty.legs.forEach(function (l) {
+      if (l.kind === 'train') {
+        out.push('  ' + pad(l.no + '列車', 8) + pad(typeName(types, l.typeId), 5) +
+          line.stations[l.fromIdx].name + ' ' + T.fmtTime(l.dep) + ' → ' +
+          line.stations[l.toIdx].name + ' ' + T.fmtTime(l.arr));
+      } else if (l.kind === 'break') {
+        out.push('  《休憩 ' + T.fmtDuration(l.to - l.from) + '》 ' + line.stations[l.atIdx].name +
+          ' ' + T.fmtTime(l.from) + '〜' + T.fmtTime(l.to));
+      } else if (l.kind === 'wait') {
+        out.push('  （待機 ' + T.fmtDuration(l.to - l.from) + '） ' + line.stations[l.atIdx].name);
+      }
+    });
+    out.push('退勤 ' + T.fmtTime(duty.signOff) + '　' + line.stations[duty.endIdx].name);
+    out.push('', '拘束 ' + T.fmtHM(duty.spreadSec) + '　実乗務 ' + T.fmtHM(duty.driveSec) +
+      '　休憩 ' + T.fmtHM(duty.breakSec) + '　待機 ' + T.fmtHM(duty.waitSec));
+    duty.warns.forEach(function (w) { out.push('※ ' + w); });
+    return out.join('\n');
+  }
+
+  function pad(s, n) { while (s.length < n) s += ' '; return s; }
+
   /** 駅の発車時刻表（時刻表冊子の体裁のプレーンテキスト） */
   function departureBoardText(line, trains, types, idx, dir) {
     var st = line.stations[idx];
@@ -124,6 +167,7 @@
   var api = {
     toJSON: toJSON, fromJSON: fromJSON,
     stationGridCSV: stationGridCSV, trainListCSV: trainListCSV, dutyCSV: dutyCSV,
+    crewCSV: crewCSV, crewSheetText: crewSheetText,
     departureBoardText: departureBoardText
   };
   root.DiaExport = api;

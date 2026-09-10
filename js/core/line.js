@@ -17,24 +17,24 @@
   /** 地方都市地下鉄を想定したサンプル線区（17駅・16.3km・全線複線） */
   function defaultLine() {
     var st = [
-      // name,          kana,             km,   dwell, canTurn, canOvertake, depot
-      ['西の丘',       'にしのおか',      0.0,  25, true,  false, true],
-      ['桜台',         'さくらだい',      1.1,  20, false, false, false],
-      ['泉が原',       'いずみがはら',    2.0,  20, false, false, false],
-      ['中央病院前',   'ちゅうおうびょういんまえ', 2.9, 20, false, true, false],
-      ['北大手',       'きたおおて',      4.0,  20, false, false, false],
-      ['城址公園',     'じょうしこうえん', 4.9,  20, false, false, false],
-      ['本町',         'ほんまち',        5.7,  25, false, false, false],
-      ['中央',         'ちゅうおう',      6.6,  35, true,  true,  false],
-      ['市役所前',     'しやくしょまえ',  7.5,  25, false, false, false],
-      ['大和橋',       'やまとばし',      8.6,  20, false, false, false],
-      ['東二番町',     'ひがしにばんちょう', 9.5, 20, false, false, false],
-      ['みなと通',     'みなとどおり',   10.6,  20, false, false, false],
-      ['港湾センター', 'こうわんセンター', 11.6, 20, false, false, false],
-      ['潮見',         'しおみ',         12.8,  25, true,  true,  false],
-      ['松風台',       'まつかぜだい',   14.0,  20, false, false, false],
-      ['工大前',       'こうだいまえ',   15.1,  20, false, false, false],
-      ['南浜',         'みなみはま',     16.3,  30, true,  false, true]
+      // name,          kana,             km,   dwell, canTurn, canOvertake, depot, crewBase
+      ['西の丘',       'にしのおか',      0.0,  25, true,  false, true,  true],
+      ['桜台',         'さくらだい',      1.1,  20, false, false, false, false],
+      ['泉が原',       'いずみがはら',    2.0,  20, false, false, false, false],
+      ['中央病院前',   'ちゅうおうびょういんまえ', 2.9, 20, false, true, false, false],
+      ['北大手',       'きたおおて',      4.0,  20, false, false, false, false],
+      ['城址公園',     'じょうしこうえん', 4.9,  20, false, false, false, false],
+      ['本町',         'ほんまち',        5.7,  25, false, false, false, false],
+      ['中央',         'ちゅうおう',      6.6,  35, true,  true,  false, true],
+      ['市役所前',     'しやくしょまえ',  7.5,  25, false, false, false, false],
+      ['大和橋',       'やまとばし',      8.6,  20, false, false, false, false],
+      ['東二番町',     'ひがしにばんちょう', 9.5, 20, false, false, false, false],
+      ['みなと通',     'みなとどおり',   10.6,  20, false, false, false, false],
+      ['港湾センター', 'こうわんセンター', 11.6, 20, false, false, false, false],
+      ['潮見',         'しおみ',         12.8,  25, true,  true,  false, false],
+      ['松風台',       'まつかぜだい',   14.0,  20, false, false, false, false],
+      ['工大前',       'こうだいまえ',   15.1,  20, false, false, false, false],
+      ['南浜',         'みなみはま',     16.3,  30, true,  false, true,  true]
     ];
     var runSec = [115, 100, 100, 120, 100, 95, 100, 100, 120, 100, 120, 110, 125, 125, 120, 130];
 
@@ -46,7 +46,7 @@
           id: 'S' + pad2(i + 1),
           name: r[0], kana: r[1], km: r[2],
           dwell: r[3],
-          canTurn: r[4], canOvertake: r[5], depot: r[6]
+          canTurn: r[4], canOvertake: r[5], depot: r[6], crewBase: r[7]
         };
       }),
       sections: runSec.map(function (s) { return { runSec: s, single: false }; })
@@ -94,7 +94,17 @@
       minTurn: 240,        // 最小折返し時分（秒）
       upOffset: 180,       // 上り初列車の下りに対するずらし（秒）
       roundTo: 5,          // 時刻の丸め単位（秒）。0 で丸めなし
-      autoHold: true       // 待避・抑止の自動挿入
+      autoHold: true,      // 待避・抑止の自動挿入
+      crew: {              // 乗務員仕業の条件
+        prep: 1500,          // 出勤から初列車の発車まで（点呼・準備）
+        wrap: 900,           // 最終列車の到着から退勤まで（後処理）
+        minRelief: 480,      // 別の編成へ移るときの交代時分
+        maxContinuous: 14400,// 休憩をはさまずに乗務できる上限
+        minBreak: 2400,      // 休憩として認める最小の時分
+        maxBreak: 7200,      // 休憩として認める最大の時分（中休を含む）
+        maxSpread: 32400,    // 1 仕業の拘束時間の上限
+        maxDrive: 21600      // 1 仕業の実乗務時間の上限
+      }
     };
   }
 

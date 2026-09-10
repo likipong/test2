@@ -4,16 +4,17 @@
 
   var T = window.DiaTime, Line = window.DiaLine, Sch = window.DiaSchedule,
       Op = window.DiaOperation, Val = window.DiaValidate, Ex = window.DiaExport,
-      Dis = window.DiaDisrupt,
+      Dis = window.DiaDisrupt, Crew = window.DiaCrew,
       Views = window.DiaViews, Editors = window.DiaEditors;
   var h = Views.h;
   var STORAGE = 'dia-editor-state-v1';
 
   var state = load() || fresh();
-  var derived = { trains: [], duties: [], dutyOf: new Map(), issues: [], notes: [] };
+  var derived = { trains: [], duties: [], dutyOf: new Map(), crew: [], crewOf: new Map(),
+                  crewParams: null, issues: [], notes: [] };
   var view = { pxPerMin: 4, pxPerKm: 26, yMode: 'km', hidden: {}, t0: null, t1: null };
   var ui = { tab: 'diagram', ttDir: 'down', ttHour: null, ttArr: false, boardSt: 0, boardDir: 'down',
-             checkLevel: { error: true, warn: true, info: true }, selected: null };
+             checkLevel: { error: true, warn: true, info: true }, selected: null, crewSel: null };
 
   var dg = window.DiaDiagram.create(document.getElementById('dg'));
   dg.onSelect = function (train) { selectTrain(train.no); };
@@ -47,7 +48,11 @@
     var a = Op.assignDuties(state.line, derived.trains, state.params);
     derived.duties = a.duties;
     derived.dutyOf = a.dutyOf;
-    derived.issues = Val.validate(state.line, derived.trains, derived.duties, state.params);
+    var c = Crew.buildCrewDuties(state.line, derived.trains, derived.duties, state.params);
+    derived.crew = c.duties;
+    derived.crewOf = c.crewOf;
+    derived.crewParams = c.params;
+    derived.issues = Val.validate(state.line, derived.trains, derived.duties, state.params, derived.crew);
     view.overlay = null;
     save();
     renderChips();
@@ -63,6 +68,7 @@
       ['列車', s.total + ' 本', ''],
       ['下り/上り', s.down + ' / ' + s.up, ''],
       ['必要編成', (s.sets != null ? s.sets : '-') + ' 本', ''],
+      ['仕業', derived.crew.length + ' 行路', ''],
       ['営業キロ', s.km.toFixed(1) + ' km', ''],
       ['最速/最遅', T.fmtDuration(s.minRide) + ' / ' + T.fmtDuration(s.maxRide), ''],
       ['表定速度', s.bestSpeed + ' km/h', ''],
@@ -83,6 +89,7 @@
     if (ui.tab === 'diagram') renderDiagram();
     if (ui.tab === 'timetable') renderTimetable();
     if (ui.tab === 'duty') renderDuty();
+    if (ui.tab === 'crew') renderCrew();
     if (ui.tab === 'check') renderCheck();
     if (ui.tab === 'disrupt') renderDisrupt();
     if (ui.tab === 'line') mount('ed-line', Editors.lineEditor(state, onEdit));
@@ -159,7 +166,7 @@
     var host = document.getElementById('tt-sheet');
     if (!tr) { host.style.display = 'none'; return; }
     host.style.display = '';
-    mount('tt-sheet', Views.trainSheet(state, tr, derived.dutyOf.get(tr)));
+    mount('tt-sheet', Views.trainSheet(state, tr, derived.dutyOf.get(tr), derived.crewOf.get(tr)));
   }
 
   function renderDuty() {
@@ -179,6 +186,44 @@
       selectTrain(no); switchTab('diagram');
     }));
     mount('duty-table', Views.dutyTable(state, derived.duties));
+  }
+
+  function renderCrew() {
+    var st = Crew.crewStats(derived.crew, derived.crewParams);
+    var sum = document.getElementById('crew-sum');
+    sum.innerHTML = '';
+    var kinds = Object.keys(st.byKind || {}).map(function (k) { return k + ' ' + st.byKind[k]; }).join('・');
+    [['仕業数', st.count + ' 行路'],
+     ['区分', kinds || '-'],
+     ['平均拘束', T.fmtHM(st.avgSpread || 0)],
+     ['平均実乗務', T.fmtHM(st.avgDrive || 0)],
+     ['最長拘束', T.fmtHM(st.maxSpread || 0)],
+     ['乗務効率', (st.efficiency || 0) + ' %'],
+     ['休憩のある仕業', (st.withBreak || 0) + ' / ' + st.count]
+    ].forEach(function (it) {
+      sum.appendChild(h('span', { class: 'chip' }, [document.createTextNode(it[0] + ' '), h('b', { text: String(it[1]) })]));
+    });
+    if (st.warned) {
+      sum.appendChild(h('span', { class: 'chip err' }, [document.createTextNode('要注意 '), h('b', { text: st.warned + ' 行路' })]));
+    }
+    mount('crew-params', Editors.crewParamEditor(state, onEdit));
+    mount('crew-gantt', Views.crewGantt(state, derived.crew, showCrew));
+    mount('crew-table', Views.crewTable(state, derived.crew, showCrew));
+    if (ui.crewSel != null) showCrew(ui.crewSel); else document.getElementById('crew-sheet').style.display = 'none';
+  }
+
+  function findCrew(no) {
+    for (var i = 0; i < derived.crew.length; i++) if (derived.crew[i].no === no) return derived.crew[i];
+    return null;
+  }
+
+  function showCrew(no) {
+    var d = findCrew(no);
+    var host = document.getElementById('crew-sheet');
+    if (!d) { host.style.display = 'none'; ui.crewSel = null; return; }
+    ui.crewSel = no;
+    host.style.display = '';
+    mount('crew-sheet', Views.crewSheet(state, d));
   }
 
   function renderCheck() {
@@ -269,12 +314,13 @@
         h('td', { text: state.line.stations[t.toIdx].name }),
         h('td', { class: 'num', text: T.fmtTime(t.arrTime) }),
         h('td', { class: 'num', text: T.fmtDuration(t.arrTime - t.depTime) }),
-        h('td', { class: 'num', text: d ? String(d.no) : '' })
+        h('td', { class: 'num', text: d ? String(d.no) : '' }),
+        h('td', { class: 'num', text: derived.crewOf.get(t) ? String(derived.crewOf.get(t).no) : '' })
       ]);
     });
     return h('div', { class: 'tbl-wrap', style: 'max-height:60vh' }, [
       h('table', {}, [
-        h('thead', {}, [h('tr', {}, ['列車', '種別', '方向', '始発', '発', '終着', '着', '所要', '運用'].map(function (t) {
+        h('thead', {}, [h('tr', {}, ['列車', '種別', '方向', '始発', '発', '終着', '着', '所要', '運用', '仕業'].map(function (t) {
           return h('th', { text: t });
         }))]),
         h('tbody', {}, rows)
@@ -293,6 +339,7 @@
     var tr = findTrain(no);
     if (!tr) return;
     var duty = derived.dutyOf.get(tr);
+    var crew = derived.crewOf.get(tr);
     var nos = duty ? duty.trains.map(function (t) { return t.no; }) : [no];
     dg.setSelection(nos);
 
@@ -304,12 +351,18 @@
           state.line.stations[duty.startIdx].name + ' ' + T.fmtTime(duty.startTime) + ' 出庫 → ' +
           state.line.stations[duty.endIdx].name + ' ' + T.fmtTime(duty.endTime) + ' 入庫）'
         : '' }),
+      crew ? h('button', { class: 'ghost', text: '仕業 ' + crew.no + ' を見る', onclick: function () {
+        showCrew(crew.no); switchTab('crew');
+      } }) : null,
+      crew ? h('button', { class: 'ghost', text: '仕業のスジを強調', onclick: function () {
+        dg.setSelection(crew.trains.map(function (t) { return t.no; }));
+      } }) : null,
       h('button', { class: 'ghost', text: '選択解除', onclick: function () {
         ui.selected = null; dg.setSelection([]);
         box.innerHTML = '<span class="hint">スジをクリックすると列車の詳細と、その運用が強調表示されるよ</span>';
       } })
     ]));
-    box.appendChild(Views.trainSheet(state, tr, duty));
+    box.appendChild(Views.trainSheet(state, tr, duty, crew));
     if (!quiet) dg.scrollToTime(tr.depTime + (tr.arrTime - tr.depTime) / 2);
   }
 
@@ -472,6 +525,13 @@
         case 'grid-up': csvDownload(base + '_時刻表_上り.csv', Ex.stationGridCSV(state.line, derived.trains, state.types, 'up')); break;
         case 'trains': csvDownload(base + '_列車一覧.csv', Ex.trainListCSV(state.line, derived.trains, state.types, derived.dutyOf)); break;
         case 'duties': csvDownload(base + '_運用.csv', Ex.dutyCSV(state.line, derived.duties)); break;
+        case 'crew': csvDownload(base + '_仕業.csv', Ex.crewCSV(state.line, derived.crew)); break;
+        case 'crew-sheet': {
+          var cd = ui.crewSel != null ? findCrew(ui.crewSel) : derived.crew[0];
+          if (!cd) { alert('先に仕業を選んでね'); return; }
+          download(base + '_仕業' + cd.no + '_行路表.txt', Ex.crewSheetText(state.line, cd, state.types));
+          break;
+        }
         case 'svg': {
           if (!dg.svg) { alert('先にダイヤグラムを表示してね'); return; }
           var clone = dg.svg.cloneNode(true);
