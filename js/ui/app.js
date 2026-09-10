@@ -324,7 +324,28 @@
   }
 
   /* ---------- 入出力 ---------- */
+  // 公開ページ（Artifact）ではブラウザのダウンロードが使えないため、
+  // 保存用の機能が使えるならそちらへ、なければ通常のダウンロードへ渡す。
+  var saver = { tried: false, cap: null };
+  function withSaver() {
+    if (saver.tried) return Promise.resolve(saver.cap);
+    saver.tried = true;
+    if (!window.claude || typeof window.claude.use !== 'function') return Promise.resolve(null);
+    return window.claude.use('downloads').then(function (c) { saver.cap = c; return c; },
+      function () { return null; });
+  }
+
   function download(name, text, mime) {
+    withSaver().then(function (cap) {
+      if (!cap) return blobDownload(name, text, mime);
+      cap.save({ filename: name, data: text }).catch(function (err) {
+        if (err && err.code === 'declined') return;
+        alert('保存できなかったよ: ' + ((err && err.message) || (err && err.code) || err));
+      });
+    });
+  }
+
+  function blobDownload(name, text, mime) {
     var blob = new Blob([text], { type: (mime || 'text/plain') + ';charset=utf-8' });
     var a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
